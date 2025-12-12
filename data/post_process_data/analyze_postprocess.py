@@ -139,12 +139,12 @@ def write_reports(output_dir: str, analyses: List[Dict], station_info: pd.DataFr
     for a in sorted(analyses, key=lambda x: x["metrics"]["year"]):
         m = a["metrics"]
         rows.append({
-            "Year": m["year"],
-            "Stations": m["station_count"],
-            "Full coverage": m["full_coverage_station_count"],
-            "Missing (any)": m["any_missing_station_count"],
-            "Duplicates": m["duplicate_records"],
-            "Out-of-range": m["out_of_range_records"],
+            "연도": m["year"],
+            "지점 수": m["station_count"],
+            "전 기간 결측 없음": m["full_coverage_station_count"],
+            "결측 존재 지점 수": m["any_missing_station_count"],
+            "중복 레코드 수": m["duplicate_records"],
+            "범위 밖 레코드 수": m["out_of_range_records"],
         })
     summary_df = pd.DataFrame(rows)
 
@@ -152,28 +152,28 @@ def write_reports(output_dir: str, analyses: List[Dict], station_info: pd.DataFr
     yoy_rows = []
     for item in yoy:
         yoy_rows.append({
-            "Year": item["year"],
-            "Added": len(item["added"]),
-            "Removed": len(item["removed"]),
+            "연도": item["year"],
+            "추가": len(item["added"]),
+            "제거": len(item["removed"]),
         })
     yoy_df = pd.DataFrame(yoy_rows)
 
     summary_path = os.path.join(output_dir, "report_summary.md")
     with open(summary_path, "w", encoding="utf-8") as f:
-        f.write(f"# KMA Post-processed Data — Summary\n\n")
-        f.write("## Yearly metrics\n\n")
+        f.write(f"# KMA 전처리 데이터 — 요약\n\n")
+        f.write("## 연도별 지표\n\n")
         if not summary_df.empty:
             f.write(_md_table(summary_df, max_rows=1000))
         else:
-            f.write("(no data)\n")
-        f.write("\n\n## Year-over-year station set changes\n\n")
+            f.write("(데이터 없음)\n")
+        f.write("\n\n## 연도 간 지점 변화\n\n")
         if not yoy_df.empty:
             f.write(_md_table(yoy_df, max_rows=1000))
         else:
-            f.write("(no data)\n")
+            f.write("(데이터 없음)\n")
 
         # Detailed added/removed listing
-        f.write("\n\n### Details: Added/Removed by year\n\n")
+        f.write("\n\n### 상세: 연도별 추가/제거 지점\n\n")
         for item in yoy:
             year = item["year"]
             added = item["added"]
@@ -183,14 +183,14 @@ def write_reports(output_dir: str, analyses: List[Dict], station_info: pd.DataFr
                 added_df = pd.DataFrame({"STN": added})
                 if not station_info.empty:
                     added_df = added_df.merge(station_info.rename(columns={"STN_ID": "STN"}), on="STN", how="left")
-                f.write("Added stations\n\n")
+                f.write("추가된 지점\n\n")
                 f.write(_md_table(added_df, max_rows=200))
                 f.write("\n\n")
             if removed:
                 removed_df = pd.DataFrame({"STN": removed})
                 if not station_info.empty:
                     removed_df = removed_df.merge(station_info.rename(columns={"STN_ID": "STN"}), on="STN", how="left")
-                f.write("Removed stations\n\n")
+                f.write("제거된 지점\n\n")
                 f.write(_md_table(removed_df, max_rows=200))
                 f.write("\n\n")
     written.append(summary_path)
@@ -206,39 +206,49 @@ def write_reports(output_dir: str, analyses: List[Dict], station_info: pd.DataFr
             if c not in per_stn.columns:
                 per_stn[c] = ""
         per_stn = per_stn[per_stn_cols]
+        # 한국어 표기로 컬럼명 변경 (표시용)
+        per_stn_display = per_stn.rename(columns={
+            "STN": "지점(STN)",
+            "LAW_ID": "법정동코드(LAW_ID)",
+            "LAW_NM": "법정동명(LAW_NM)",
+            "days_present": "관측일수",
+            "days_expected": "기대일수",
+            "days_missing": "결측일수",
+            "missing_sample": "결측 예시",
+        })
         duplicates = a["details"]["duplicates"].rename(columns={"STN_clean": "STN"})
         out_of_range = a["details"]["out_of_range"].rename(columns={"STN_clean": "STN"})
 
         year_path = os.path.join(output_dir, f"report_{year}.md")
         with open(year_path, "w", encoding="utf-8") as f:
-            f.write(f"# Year {year} — Data quality & coverage\n\n")
+            f.write(f"# {year}년 — 데이터 품질 및 커버리지\n\n")
             m = a["metrics"]
-            f.write("## Summary\n\n")
+            f.write("## 요약\n\n")
             f.write(
-                f"- Stations: {m['station_count']}\n\n"
-                f"- Full coverage stations: {m['full_coverage_station_count']}\n\n"
-                f"- Stations with any missing days: {m['any_missing_station_count']}\n\n"
-                f"- Duplicate (STN, TM) records: {m['duplicate_records']}\n\n"
-                f"- Out-of-range date records: {m['out_of_range_records']}\n\n"
+                f"- 지점 수: {m['station_count']}\n\n"
+                f"- 전 기간 커버리지 완전 지점 수: {m['full_coverage_station_count']}\n\n"
+                f"- 결측 존재 지점 수: {m['any_missing_station_count']}\n\n"
+                f"- 중복 (STN, TM) 레코드: {m['duplicate_records']}\n\n"
+                f"- 범위 밖 날짜 레코드: {m['out_of_range_records']}\n\n"
             )
 
-            f.write("## Per-station coverage\n\n")
-            if not per_stn.empty:
-                f.write(_md_table(per_stn, max_rows=2000))
+            f.write("## 지점별 커버리지\n\n")
+            if not per_stn_display.empty:
+                f.write(_md_table(per_stn_display, max_rows=2000))
             else:
-                f.write("(no data)\n")
+                f.write("(데이터 없음)\n")
 
-            f.write("\n\n## Duplicate records (STN, TM)\n\n")
+            f.write("\n\n## 중복 레코드 (STN, TM)\n\n")
             if not duplicates.empty:
-                f.write(_md_table(duplicates.rename(columns={"TM_dt": "TM"}), max_rows=100))
+                f.write(_md_table(duplicates.rename(columns={"TM_dt": "TM"}).rename(columns={"STN": "지점(STN)", "TM": "날짜(TM)"}), max_rows=100))
             else:
-                f.write("(none)\n")
+                f.write("(없음)\n")
 
-            f.write("\n\n## Out-of-range dates\n\n")
+            f.write("\n\n## 범위 밖 날짜\n\n")
             if not out_of_range.empty:
-                f.write(_md_table(out_of_range.rename(columns={"TM_dt": "TM"}), max_rows=100))
+                f.write(_md_table(out_of_range.rename(columns={"TM_dt": "TM"}).rename(columns={"STN": "지점(STN)", "TM": "날짜(TM)"}), max_rows=100))
             else:
-                f.write("(none)\n")
+                f.write("(없음)\n")
         written.append(year_path)
 
     return written
@@ -261,7 +271,9 @@ def run_analysis(post_dir: str) -> List[str]:
         print("분석할 CSV가 없습니다.")
         return []
 
-    written = write_reports(post_dir, analyses, station_info)
+    # 출력 경로를 하위 report 폴더로 변경 (기존 영문 보고서는 유지)
+    report_dir = os.path.join(post_dir, "report")
+    written = write_reports(report_dir, analyses, station_info)
     print("다음 리포트를 생성했습니다:")
     for w in written:
         print(f" - {w}")
