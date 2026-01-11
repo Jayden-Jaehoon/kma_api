@@ -101,7 +101,7 @@ if __name__ == "__main__":
         raise ValueError("authKey를 .env 파일에 설정해주세요")
 
     # 저장 디렉토리
-    SAVE_DIR = "/Users/jaehoon/liminal_ego/git_clones/kma_api/data"
+    SAVE_DIR = "/data"
 
     print("=" * 80)
     print("기상청 지점 정보 다운로드")

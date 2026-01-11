@@ -122,10 +122,10 @@ python get_station_info.py
 ### 코드에서 사용
 
 ```python
-from get_station_info import download_station_info, download_all_station_info
+from _VER1.get_station_info import download_station_info, download_all_station_info
 
 # 단일 종류(SFC) 다운로드
-download_station_info(inf_type="SFC", auth_key=auth_key, save_dir="data")
+download_station_info(inf_type="SFC", auth_key=auth_key, save_dir="../data")
 
 # 여러 종류를 확장하고 싶다면 download_all_station_info 내부의 station_types를 늘리세요.
 ```

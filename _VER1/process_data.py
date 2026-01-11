@@ -68,7 +68,7 @@ def process_raw_txt_to_csv(input_txt_path: str, output_csv_path: str, cols: Opti
     # 후처리: STN(지점번호) 기준으로 행정구역 코드(LAW_ID) 매핑하여 컬럼 추가
     # 참고 파일: data/station_info_structured.csv (컬럼: STN_ID, LAW_ID, ...)
     try:
-        station_info_csv = os.path.join(os.path.dirname(__file__), "data", "station_info_structured.csv")
+        station_info_csv = os.path.join(os.path.dirname(__file__), "../data", "station_info_structured.csv")
         if os.path.exists(station_info_csv):
             info_df = pd.read_csv(
                 station_info_csv,
@@ -176,5 +176,5 @@ if __name__ == "__main__":
     if not auth_key:
         raise ValueError("authKey를 .env 파일에 설정해주세요")
 
-    BASE_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+    BASE_DATA_DIR = os.path.join(os.path.dirname(__file__), "../data")
     run_year_range(auth_key, BASE_DATA_DIR, start_year=1970, end_year=1972, stn="0")

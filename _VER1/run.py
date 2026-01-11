@@ -10,7 +10,7 @@ if __name__ == "__main__" :
         raise ValueError("authKey를 .env 파일에 설정해주세요")
 
     # 데이터 루트 디렉토리 (data 하위에 raw_data / post_process_data 자동 생성)
-    BASE_DATA_DIR = "/Users/jaehoon/liminal_ego/git_clones/kma_api/data"
+    BASE_DATA_DIR = "/data"
 
     # 연단위 다운로드 + 전처리 실행 예시
     try:
