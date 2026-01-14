@@ -1,0 +1,13 @@
+numpy<2
+pandas==1.5.3
+requests>=2.31.0
+python-dotenv>=1.0.1
+
+# 융합기상정보 처리 추가 패키지
+geopandas>=0.14.0
+shapely>=2.0.0
+pyproj>=3.6.0
+xarray>=2023.1.0
+netCDF4>=1.6.0
+pyarrow>=14.0.0
+tqdm>=4.65.0

@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.csv
 *.txt
+!/requirements.txt
 *.xml
 *.parquet
 data/geodata/BND_ADM_DONG_PG.*
