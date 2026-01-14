@@ -52,6 +52,13 @@ class FusionConfig:
     api_base_url: str = "https://apihub.kma.go.kr/api/typ01"
     max_query_minutes: int = 60  # API 최대 조회 기간 (분)
     api_sleep_seconds: float = 0.5  # API 호출 간격
+
+    # 다운로드 재시도 설정
+    # - 네트워크 일시 장애(ChunkedEncodingError 등)나 간헐적인 API 오류에 대비합니다.
+    # - 최종적으로도 실패하면 상위 루프(process_month 등)에서 날짜를 건너뛰도록 예외가 전파됩니다.
+    download_retry_attempts: int = 3  # 총 시도 횟수(= 1회 요청 + 재시도)
+    download_retry_initial_sleep_seconds: float = 10.0  # 1회 실패 후 대기(초)
+    download_retry_backoff: float = 2.0  # 재시도 대기시간 배수(지수 backoff)
     
     # 변수 설정
     variables: Dict[str, Dict] = field(default_factory=lambda: {

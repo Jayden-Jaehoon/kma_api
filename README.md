@@ -1,24 +1,63 @@
-### 프로젝트 개요 (`run_fusion.py` 기준)
+### 프로젝트 개요 (A/B 분리 실행 기준)
 이 프로젝트는 기상청 API로부터 “격자 단위” 기상 데이터를 내려받아(다운로드/캐시) 시간 집계 후, **격자 → 행정동(코드) 단위로 공간 집계**하여 일별 결과를 만드는 파이프라인입니다.
 
-실행 엔트리포인트는 `run_fusion.py`이며, 내부적으로 `fusion/pipeline.py`의 `FusionPipeline`과 `fusion/geocode.py`의 `GridToLawIdMapper`를 사용합니다.
+현재 권장 실행 엔트리포인트는 아래 2개입니다.
+- A(다운로드/캐시): `run_download_fusion.py`
+- B(캐시 기반 후처리): `run_process_fusion.py`
+
+내부적으로 `fusion/pipeline.py`의 `FusionPipeline`과 `fusion/geocode.py`의 `GridToLawIdMapper`를 사용합니다.
 
 ---
 
-### 실행 방법 및 주요 옵션 (`run_fusion.py`)
-`run_fusion.py`는 크게 2가지 일을 합니다.
+### 실행 전 준비
+**필수:** 프로젝트 루트의 `.env`에 `authKey`가 있어야 합니다.
 
-#### 1) 격자-행정동(코드) 매핑 테이블 생성/재생성
-- `python run_fusion.py --build-mapping`
-- `python run_fusion.py --rebuild-mapping`
+예:
+```bash
+authKey=발급받은_인증키
+```
 
-#### 2) 일/월/연 단위 처리 파이프라인 실행
-- 기본: `python run_fusion.py`
-- 기간/변수 지정: `python run_fusion.py --start-year 2020 --end-year 2024 --variables ta,rn_60m,sd_3hr`
-- 특정 하루만 테스트: `python run_fusion.py --test-day 20240101 --variables ta,rn_60m`
+### (선택) 격자→행정동 매핑(`grid_to_lawid.parquet`) 생성/재생성
+후처리(B 단계)에서는 행정동 공간 집계를 위해 `data/geodata/grid_to_lawid.parquet`가 필요합니다.
 
-**필수:**
-- `.env`에 `authKey`가 있어야 합니다. (`run_fusion.py`에서 `dotenv.load_dotenv()` 후 `os.getenv("authKey")`로 읽음)
+- 파일이 이미 있으면 그대로 사용됩니다.
+- 파일이 없으면 B 단계 실행 중 자동으로 생성될 수 있으나(시간이 오래 걸 수 있음), **처음 한 번은 별도로 생성/검증하는 것을 권장**합니다.
+
+생성(없으면 생성, 있으면 로드):
+```bash
+python -c "import os; from fusion.config import FusionConfig; from fusion.geocode import GridToLawIdMapper; cfg=FusionConfig(project_root=os.getcwd()); GridToLawIdMapper(cfg).build_mapping(force_rebuild=False)"
+```
+
+재생성(강제):
+```bash
+python -c "import os; from fusion.config import FusionConfig; from fusion.geocode import GridToLawIdMapper; cfg=FusionConfig(project_root=os.getcwd()); GridToLawIdMapper(cfg).build_mapping(force_rebuild=True)"
+```
+
+---
+
+### 권장 실행 흐름: A(다운로드/캐시) → B(후처리) 분리
+대용량 전체격자 API 호출은 시간이 오래 걸리고, 중간 실패 시 재시도/로그 관리가 중요합니다.
+따라서 **다운로드 단계(A)** 와 **캐시 기반 후처리 단계(B)** 를 분리해 운용하는 것을 권장합니다.
+
+#### A) raw 다운로드/캐시 생성: `run_download_fusion.py`
+- 목적: `data/fusion_raw/YYYY/MM/{var}_{date}_parsed.parquet`를 먼저 채웁니다.
+- 특징: **날짜 단위 병렬 처리**(기본 `--max-workers 4`)
+
+예:
+```bash
+python run_download_fusion.py --start-year 2024 --end-year 2024 --start-month 6 --end-month 7 --variables ta,rn_60m,sd_3hr
+python run_download_fusion.py --test-day 20241128 --variables ta,rn_60m
+```
+
+#### B) 캐시 기반 후처리(피벗/공간집계/출력): `run_process_fusion.py`
+- 목적: A 단계에서 만들어진 `*_parsed.parquet`만 사용해 `data/fusion_interim`, `data/fusion_output`을 생성합니다.
+- 정책: **캐시가 누락된 날짜/변수는 스킵(B 정책)** 하고 요약을 출력합니다.
+
+예:
+```bash
+python run_process_fusion.py --start-year 2024 --end-year 2024 --start-month 6 --end-month 7 --variables ta,rn_60m,sd_3hr
+python run_process_fusion.py --test-day 20241128 --variables ta,rn_60m
+```
 
 ---
 
@@ -75,7 +114,7 @@
 - **역할**: 매번 공간조인을 수행하지 않도록, 격자점마다 행정동 코드/명칭을 미리 계산해 저장한 캐시 테이블입니다.
 - **생성/갱신 위치**:
   - `fusion/geocode.py`의 `GridToLawIdMapper.build_mapping()`
-  - `run_fusion.py --build-mapping` 또는 파이프라인 실행 시 `FusionPipeline.ensure_mapping()`에서 필요하면 생성
+  - B 단계 실행 시 `FusionPipeline.ensure_mapping()`에서 필요하면 생성(권장: 위의 별도 생성 커맨드로 선행)
 - **스키마(코드 기준)**: `grid_idx`, `lat`, `lon`, `LAW_ID`, `LAW_NM`
 - **주의**:
   - `LAW_ID`는 실제로는 이 Shapefile의 `ADM_CD`가 들어가며, 프로젝트에서는 이를 통칭해 `LAW_ID` 컬럼에 담습니다.
@@ -135,7 +174,7 @@
 ---
 
 ### 파이프라인에서 매핑이 쓰이는 지점 (큰 흐름)
-1. `run_fusion.py` → `FusionPipeline(auth_key, config)` 생성
+1. (실행 스크립트에서) `FusionPipeline(auth_key, config)` 생성
 2. `FusionPipeline.ensure_mapping()`
    - 내부에서 `GridToLawIdMapper.build_mapping()` 실행(또스 `grid_to_lawid.parquet` 로드)
    - `SpatialAggregator(self._grid_mapping, config)` 준비
@@ -147,14 +186,14 @@
 ---
 
 ### 운영/갱신 시 실무 체크리스트 (특히 `data/geodata`)
-- **`sfc_grid_latlon.nc`를 교체/갱신하면**: 격자 구조(차원/순서)가 바뀔 수 있으므로 **반드시 `--rebuild-mapping`으로 `grid_to_lawid.parquet` 재생성** 권장
+- **`sfc_grid_latlon.nc`를 교체/갱신하면**: 격자 구조(차원/순서)가 바뀔 수 있으므로 **반드시 `grid_to_lawid.parquet` 재생성** 권장
 - **`BND_ADM_DONG_PG.*`를 교체/갱신하면**: `ADM_CD`/`ADM_NM` 체계가 바뀌거나 경계가 업데이트될 수 있으므로 **재매핑 필요**
 - **미매핑 격자 비율이 과도하게 높다면**: (1) Shapefile 커버리지, (2) 좌표계 변환, (3) `within` 경계 판정 특성(경계점) 이슈를 우선 의심
 
 ---
 
 ### 참고: 관련 파일 위치 요약
-- **실행**: `run_fusion.py`
+- **실행(A/B)**: `run_download_fusion.py`, `run_process_fusion.py`
 - **설정**: `fusion/config.py`
 - **격자→행정동 매핑**: `fusion/geocode.py`
 - **공간 집계(미매핑 제거 포함)**: `fusion/aggregate.py` (`SpatialAggregator`)

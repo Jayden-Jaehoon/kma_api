@@ -148,11 +148,17 @@ class TimeAggregator:
             )
         
         # 피벗
+        # 피벗 수행: 시간별 데이터를 컬럼으로 변환
+        # - index: 각 행을 고유하게 식별하는 키 컬럼 (grid_idx: 격자 인덱스, date: 날짜)
+        # - columns: 새로운 컬럼명이 될 값들 (col_name: 위에서 생성한 t0001, t0102 등)
+        # - values: 각 셀에 채워질 실제 값 (var_col: ta, rn_60m, sd_3hr 등의 관측값)
+        # - aggfunc='first': 동일한 (grid_idx, date, col_name) 조합이 중복 존재하면 첫 번째 값만 사용
+        #   (정상적인 데이터에서는 중복이 없어야 하지만, 만약의 경우 대비)
         pivot_df = df.pivot_table(
-            index=[grid_col, 'date'],
-            columns='col_name',
-            values=var_col,
-            aggfunc='first',  # 중복 시 첫 번째 값
+            index=[grid_col, 'date'],  # 행 인덱스: (격자번호, 날짜)
+            columns='col_name',  # 컬럼으로 펼칠 값: 시간대별 컬럼명
+            values=var_col,  # 채워질 값: 관측 변수
+            aggfunc='first',  # 중복 시 첫 번째 값 선택 (중복 방지용)
         ).reset_index()
         
         # 컬럼 순서 정렬

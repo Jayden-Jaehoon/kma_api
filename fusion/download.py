@@ -28,6 +28,62 @@ class FusionDataDownloader:
         self.auth_key = auth_key
         self.config = config or DEFAULT_CONFIG
         self.config.ensure_dirs()
+
+    def _get_validation_log_path(self, date: str, obs: str) -> str:
+        """검증/다운로드 오류 로그 파일 경로.
+
+        요청사항: 검증 오류가 생긴 부분을 `data/fusion_raw` 아래 txt로 남깁니다.
+        - 너무 많은 파일이 생기지 않도록 하루/변수 단위로 append 합니다.
+        """
+        year = date[:4]
+        month = date[4:6]
+        log_dir = os.path.join(self.config.fusion_raw_dir, "_validation_logs", year, month)
+        os.makedirs(log_dir, exist_ok=True)
+        return os.path.join(log_dir, f"{date}_{obs}.txt")
+
+    def _append_validation_log(
+        self,
+        *,
+        date: str,
+        obs: str,
+        tm: Optional[str],
+        level: str,
+        message: str,
+        response_preview: Optional[str] = None,
+    ) -> None:
+        """검증 로그를 파일에 append."""
+        path = self._get_validation_log_path(date=date, obs=obs)
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tm_part = tm if tm is not None else "-"
+
+        lines = [
+            f"[{ts}] [{level}] tm={tm_part} obs={obs} :: {message}",
+        ]
+        if response_preview:
+            lines.append("  response_preview: " + response_preview.replace("\n", " ")[:500])
+
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+    @staticmethod
+    def _looks_like_error_response(text: str) -> bool:
+        """ASCII 응답이 데이터가 아닌 에러/HTML 본문처럼 보이는지 빠르게 판별."""
+        if text is None:
+            return True
+
+        t = text.strip()
+        if not t:
+            return True
+
+        head = t[:400].lower()
+        if "<html" in head or "<!doctype html" in head:
+            return True
+        if "forbidden" in head or "unauthorized" in head:
+            return True
+        if "error" in head and "#" not in head:
+            # 데이터 포맷이 아닌 에러 메시지일 가능성
+            return True
+        return False
     
     def download_hour_all_grid(
         self,
@@ -63,9 +119,29 @@ class FusionDataDownloader:
             if resp.status_code == 403:
                 print(f"다운로드 거부 (403 Forbidden) - {obs}: API 권한을 확인해주세요.")
                 print(f"  기상청 API 허브(apihub.kma.go.kr) 마이페이지에서 '{obs}' 요소의 사용 권한이 있는지 확인이 필요합니다.")
+                self._append_validation_log(
+                    date=tm[:8],
+                    obs=obs,
+                    tm=tm,
+                    level="ERROR",
+                    message="HTTP 403 Forbidden",
+                    response_preview=resp.text if resp is not None else None,
+                )
                 return None
                 
             resp.raise_for_status()
+
+            # 최소 검증: ASCII인데 데이터가 아닌 에러/HTML 응답이면 실패로 처리하고 로그를 남깁니다.
+            if disp == 'A' and self._looks_like_error_response(resp.text):
+                self._append_validation_log(
+                    date=tm[:8],
+                    obs=obs,
+                    tm=tm,
+                    level="ERROR",
+                    message="응답 본문이 비어있거나 에러/HTML로 보입니다.",
+                    response_preview=resp.text,
+                )
+                return None
             
             # 저장
             if save_dir:
@@ -85,6 +161,13 @@ class FusionDataDownloader:
             
         except Exception as e:
             print(f"다운로드 실패 ({tm}, {obs}): {e}")
+            self._append_validation_log(
+                date=tm[:8],
+                obs=obs,
+                tm=tm,
+                level="ERROR",
+                message=f"다운로드 예외: {type(e).__name__}: {e}",
+            )
             return None
     
     def download_point_multi_var(
@@ -126,6 +209,15 @@ class FusionDataDownloader:
         try:
             resp = requests.get(url, params=params, timeout=60)
             resp.raise_for_status()
+
+            # 응답 인코딩 보정
+            # - API는 종종 `text/plain;charset=EUC-KR` 형태로 내려옵니다.
+            # - requests가 추정에 실패하면 한글/특수문자 파싱이 깨질 수 있어 헤더 기반으로 보정합니다.
+            content_type = (resp.headers.get("content-type") or "").lower()
+            if "euc-kr" in content_type or "euckr" in content_type:
+                resp.encoding = "euc-kr"
+            elif "cp949" in content_type:
+                resp.encoding = "cp949"
             
             # 응답 파싱
             df = self._parse_point_response(resp.text, obs_list)
@@ -158,6 +250,10 @@ class FusionDataDownloader:
         os.makedirs(save_dir, exist_ok=True)
         
         saved_files = []
+
+        retry_attempts = max(1, int(getattr(self.config, "download_retry_attempts", 1)))
+        retry_initial_sleep = float(getattr(self.config, "download_retry_initial_sleep_seconds", 0.0))
+        retry_backoff = float(getattr(self.config, "download_retry_backoff", 1.0))
         
         # 적설은 30분 간격, 나머지는 5분 간격
         if obs.startswith('sd_'):
@@ -169,13 +265,55 @@ class FusionDataDownloader:
             times = [f"{date}{h:02d}00" for h in range(24)]
         
         for tm in times:
-            filepath = self.download_hour_all_grid(tm, obs, save_dir)
+            filepath = None
+            for attempt in range(1, retry_attempts + 1):
+                filepath = self.download_hour_all_grid(tm, obs, save_dir)
+                if filepath:
+                    break
+
+                self._append_validation_log(
+                    date=date,
+                    obs=obs,
+                    tm=tm,
+                    level="WARN" if attempt < retry_attempts else "ERROR",
+                    message=f"다운로드 실패/빈 응답 (attempt {attempt}/{retry_attempts})",
+                )
+
+                if attempt < retry_attempts:
+                    sleep_seconds = retry_initial_sleep * (retry_backoff ** (attempt - 1))
+                    self._append_validation_log(
+                        date=date,
+                        obs=obs,
+                        tm=tm,
+                        level="INFO",
+                        message=f"재시도 대기: {sleep_seconds:.1f}s 후 재요청 (next_attempt {attempt + 1}/{retry_attempts})",
+                    )
+                    time.sleep(max(0.0, sleep_seconds))
+
             if filepath:
                 saved_files.append(filepath)
             
             # API 호출 간격
             time.sleep(self.config.api_sleep_seconds)
-        
+
+        # 시간대 누락 검증: 기대한 tm 수만큼 파일이 만들어졌는지 확인
+        if len(saved_files) != len(times):
+            saved_set = set(os.path.basename(p) for p in saved_files)
+            expected_set = set(f"{obs}_{tm}.txt" for tm in times)
+            missing = sorted(expected_set - saved_set)
+            self._append_validation_log(
+                date=date,
+                obs=obs,
+                tm=None,
+                level="ERROR",
+                message=f"하루 다운로드 누락: saved={len(saved_files)}/{len(times)} missing_files={len(missing)}",
+                response_preview=("missing=" + ",".join(missing[:20])) if missing else None,
+            )
+            raise RuntimeError(
+                f"하루 다운로드 누락: {date} {obs} saved={len(saved_files)}/{len(times)}. "
+                f"validation_log={self._get_validation_log_path(date=date, obs=obs)}"
+            )
+
         return saved_files
     
     def download_netcdf(
@@ -233,45 +371,93 @@ class FusionDataDownloader:
         202306110005, 33.361, 126.5329, 22.4, 18.2, 78.5
         ...
         """
-        lines = text.strip().split('\n')
-        data_lines = [l for l in lines if l.strip() and not l.strip().startswith('#')]
-        
-        if not data_lines:
+        if text is None:
             return None
-        
-        # 헤더 추출 (주석에서)
+
+        lines = [l.rstrip() for l in text.strip().split('\n') if l.strip()]
+        if not lines:
+            return None
+
+        # 1) 컬럼명 결정
+        # - `help=1`일 때 종종 아래처럼 내려옵니다.
+        #   "# tm, ta, rn_60m, sd_3hr"
+        # - 어떤 경우에는 LAT/LON이 포함될 수도 있고, 포함되지 않을 수도 있습니다.
         header_line = None
         for line in lines:
-            if line.strip().startswith('#') and 'TM' in line.upper():
-                header_line = line.strip('#').strip()
+            s = line.strip()
+            if not s.startswith('#'):
+                continue
+            # '# tm, ...' 또는 '# TM, ...' 형태를 우선적으로 잡습니다.
+            body = s.lstrip('#').strip()
+            if body.lower().startswith('tm'):
+                header_line = body
                 break
-        
+
         if header_line:
-            columns = [c.strip() for c in header_line.split(',')]
+            columns = [c.strip() for c in header_line.split(',') if c.strip()]
         else:
-            # 기본 컬럼 구성
-            columns = ['TM', 'LAT', 'LON'] + [o.upper() for o in obs_list]
-        
-        # 데이터 파싱
-        records = []
-        for line in data_lines:
-            values = [v.strip() for v in line.split(',')]
-            if len(values) >= len(columns):
-                records.append(values[:len(columns)])
-        
+            columns = []
+
+        # 2) 데이터 라인 수집
+        # - '#START7777' 같은 시작 마커/주석은 제외
+        # - 일부 응답은 마지막에 'YYYYMMDD' 같은 단일 토큰 라인이 붙기도 해서 스킵
+        data_rows: list[list[str]] = []
+        for line in lines:
+            s = line.strip()
+            if not s or s.startswith('#'):
+                continue
+
+            parts = [p.strip() for p in s.split(',') if p.strip()]
+            if not parts:
+                continue
+
+            # 말미에 붙는 '20241128' 같은 라인(콤마 없이 날짜만) 방어
+            if len(parts) == 1 and parts[0].isdigit() and len(parts[0]) == 8:
+                continue
+
+            data_rows.append(parts)
+
+        if not data_rows:
+            return None
+
+        # 3) 헤더가 없을 때는 첫 데이터의 컬럼 수로 추론
+        if not columns:
+            ncols = len(data_rows[0])
+            # 흔한 케이스: tm + obs_list
+            if ncols == 1 + len(obs_list):
+                columns = ['tm'] + obs_list
+            # 대안: tm + lat + lon + obs_list
+            elif ncols == 3 + len(obs_list):
+                columns = ['tm', 'lat', 'lon'] + obs_list
+            else:
+                # 그래도 모르겠으면 일단 tm + v1..vn 형태로 생성
+                columns = ['tm'] + [f"v{i}" for i in range(1, ncols)]
+
+        # 4) 데이터 길이 맞는 행만 취함 (불일치 행은 스킵)
+        records = [row[:len(columns)] for row in data_rows if len(row) >= len(columns)]
         if not records:
             return None
-        
+
         df = pd.DataFrame(records, columns=columns)
-        
-        # 타입 변환
-        if 'TM' in df.columns:
-            df['TM'] = pd.to_datetime(df['TM'], format='%Y%m%d%H%M')
-        
+
+        # 5) 타입 변환
+        # - tm: YYYYMMDDHHmm 형식(문서 기준)
+        # - 나머지: 숫자 변환
+        tm_col = None
+        for c in ['TM', 'tm']:
+            if c in df.columns:
+                tm_col = c
+                break
+
+        if tm_col is not None:
+            # 이전 코드와의 호환을 위해 TM 컬럼은 datetime으로 변환
+            df[tm_col] = pd.to_datetime(df[tm_col].astype(str), format='%Y%m%d%H%M', errors='coerce')
+
         for col in df.columns:
-            if col not in ['TM']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
+            if tm_col is not None and col == tm_col:
+                continue
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
         return df
     
     @staticmethod
