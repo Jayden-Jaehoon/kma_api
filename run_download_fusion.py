@@ -175,7 +175,7 @@ if __name__ == "__main__":
     # - CLI로 실행할 때는 기본값(=USE_IDE_DEFAULTS=False)을 유지하세요.
     # - IDE에서 실행/디버깅할 때는 아래 값만 수정한 뒤 실행하면 됩니다.
 
-    USE_IDE_DEFAULTS = False
+    USE_IDE_DEFAULTS = True
 
     # IDE에서 Working Directory를 프로젝트 루트로 잡지 못할 때만 사용하세요.
     # (보통은 Run Configuration의 Working directory를 프로젝트 루트로 설정하는 것이 더 깔끔합니다.)
@@ -188,19 +188,19 @@ if __name__ == "__main__":
         # 예시 1) 하루만 다운로드
         ide_argv = [
             "--test-day",
-            "20241128",
+            "20260116",
             "--variables",
             "ta,rn_60m,sd_3hr",
             "--max-workers",
-            "4",
+            "1",
         ]
 
         # 예시 2) 연/월 범위 다운로드 (필요하면 위 ide_argv와 교체)
         # ide_argv = [
-        #     "--start-year", "2024",
-        #     "--end-year", "2024",
-        #     "--start-month", "6",
-        #     "--end-month", "7",
+        #     "--start-year", "2000",
+        #     "--end-year", "2025",
+        #     "--start-month", "1",
+        #     "--end-month", "12",
         #     "--variables", "ta,rn_60m,sd_3hr",
         #     "--max-workers", "4",
         # ]
