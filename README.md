@@ -10,12 +10,37 @@
 ---
 
 ### 실행 전 준비
+
+#### 1) API 인증키 설정
 **필수:** 프로젝트 루트의 `.env`에 `authKey`가 있어야 합니다.
 
 예:
 ```bash
 authKey=발급받은_인증키
 ```
+
+#### 2) API URL 설정 (일반 vs 대용량 기관용)
+기상청 API 허브는 **일반 사용자용**과 **대용량 기관용** 두 가지 도메인을 제공합니다.
+
+| 구분 | URL | 비고 |
+|------|-----|------|
+| 대용량 기관용 | `https://apihub-org.kma.go.kr/api/typ01` | 기본값 (현재 설정) |
+| 일반 사용자용 | `https://apihub.kma.go.kr/api/typ01` | 일반 API 키 사용 시 |
+
+**중요:** 발급받은 API 키 종류에 맞는 URL을 사용해야 합니다.
+- 대용량 기관용 API 키 → `apihub-org.kma.go.kr` 사용
+- 일반 사용자용 API 키 → `apihub.kma.go.kr` 사용
+
+URL 변경이 필요한 경우 `fusion/config.py`의 `api_base_url` 설정을 수정하세요:
+```python
+# 대용량 기관용 API (기본값)
+api_base_url: str = "https://apihub-org.kma.go.kr/api/typ01"
+
+# 일반 사용자용 API (필요시 주석 해제)
+# api_base_url: str = "https://apihub.kma.go.kr/api/typ01"
+```
+
+**참고:** 잘못된 URL을 사용하면 `HTTP 403 Forbidden` 오류("일반사용자용 도메인입니다" 등)가 발생합니다.
 
 ### (선택) 격자→행정동 매핑(`grid_to_lawid.parquet`) 생성/재생성
 후처리(B 단계)에서는 행정동 공간 집계를 위해 `data/geodata/grid_to_lawid.parquet`가 필요합니다.

@@ -49,7 +49,8 @@ class FusionConfig:
         return os.path.join(self.geodata_dir, "grid_to_lawid.parquet")
     
     # API 설정
-    api_base_url: str = "https://apihub.kma.go.kr/api/typ01"
+    api_base_url: str = "https://apihub-org.kma.go.kr/api/typ01"
+    # api_base_url: str = "https://apihub.kma.go.kr/api/typ01" #일반API
     max_query_minutes: int = 60  # API 최대 조회 기간 (분)
     api_sleep_seconds: float = 0.5  # API 호출 간격
 
