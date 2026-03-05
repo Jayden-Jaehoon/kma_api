@@ -1,5 +1,7 @@
 # KMA Fusion Weather Data Pipeline
 
+[한국어 버전](README_KOR.md)
+
 ## Overview
 
 This project downloads grid-based meteorological data from the Korea Meteorological Administration (KMA) API, performs temporal aggregation, and then spatially aggregates from **grid cells to legal dong (Eup/Myeon/Dong) administrative boundaries** to produce daily weather data.
