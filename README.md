@@ -275,17 +275,22 @@ When multiple grid cells fall within a single legal dong boundary, the pipeline 
 
 1. **Temperature (`ta`)**:
    - Method: `mean()` - Average of all grid cell values in the legal dong
-   - NaN handling: Preserved (excluded from mean calculation)
+   - NaN handling: **Preserved** (excluded from mean calculation)
+   - Rationale: Missing temperature data doesn't mean "zero temperature". Excluding NaN values prevents bias in the average calculation. If a grid cell has missing data, it's better to calculate the mean only from valid measurements.
    - Example: If legal dong "청운효자동" contains 5 grid cells with temperatures [15.2, 15.5, NaN, 15.3, 15.4]℃, the result is (15.2+15.5+15.3+15.4)/4 = 15.35℃
+   - Note: The NaN is excluded, so we divide by 4 (valid values) not 5 (total cells)
 
 2. **Precipitation (`rn_60m`)**:
    - Method: `mean()` - Average of all grid cell values in the legal dong
-   - NaN handling: Converted to 0 (assumption: no data = no precipitation)
+   - NaN handling: **Converted to 0** (assumption: no data = no precipitation)
+   - Rationale: For precipitation events, missing data typically means no precipitation occurred at that location. Converting NaN to 0 is meteorologically sound - if there was significant rainfall, it would have been measured/estimated. This prevents overestimating precipitation by excluding dry areas.
    - Example: If a legal dong contains 5 grid cells with precipitation [0.5, 1.2, NaN, 0.0, 0.3]mm, the result is (0.5+1.2+0+0.0+0.3)/5 = 0.4mm
+   - Note: The NaN is treated as 0, and we divide by 5 (all cells) to get representative area-average precipitation
 
 3. **Snowfall (`sd_3hr`)**:
    - Method: `mean()` - Average of all grid cell values in the legal dong
-   - NaN handling: Converted to 0 (assumption: no data = no snowfall)
+   - NaN handling: **Converted to 0** (assumption: no data = no snowfall)
+   - Rationale: Same logic as precipitation - missing snowfall data indicates no snow event at that location
    - Seasonal: Only produced October-May (automatically skipped for Jun-Sep)
 
 **Key Implementation Details:**
