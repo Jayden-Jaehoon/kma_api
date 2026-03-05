@@ -1,7 +1,7 @@
 """
-융합기상정보 전체 처리 파이프라인
+융합기상정보 전체 처리 파이프라인 (법정동 기반)
 
-다운로드 → 파싱 → 시간 집계 → 공간 집계 → 출력
+다운로드 → 파싱 → 시간 집계 → 공간 집계(법정동) → 출력
 """
 
 import os
@@ -48,7 +48,7 @@ class FusionPipeline:
         self._expected_grid_n: Optional[int] = None
     
     def ensure_mapping(self, force_rebuild: bool = False):
-        """격자-법정동 매핑 테이블 확보"""
+        """격자-법정동(읍면동) 매핑 테이블 확보"""
         if self._grid_mapping is None or force_rebuild:
             self._grid_mapping = self.mapper.build_mapping(force_rebuild=force_rebuild)
             self._spatial_agg = SpatialAggregator(self._grid_mapping, self.config)

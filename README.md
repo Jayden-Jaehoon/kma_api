@@ -1,5 +1,5 @@
 ### 프로젝트 개요 (A/B 분리 실행 기준)
-이 프로젝트는 기상청 API로부터 “격자 단위” 기상 데이터를 내려받아(다운로드/캐시) 시간 집계 후, **격자 → 행정동(코드) 단위로 공간 집계**하여 일별 결과를 만드는 파이프라인입니다.
+이 프로젝트는 기상청 API로부터 "격자 단위" 기상 데이터를 내려받아(다운로드/캐시) 시간 집계 후, **격자 → 법정동(읍면동) 단위로 공간 집계**하여 일별 결과를 만드는 파이프라인입니다.
 
 현재 권장 실행 엔트리포인트는 아래 2개입니다.
 - A(다운로드/캐시): `run_download_fusion.py`
@@ -17,11 +17,12 @@
 authKey=발급받은_인증키
 ```
 
-### (선택) 격자→행정동 매핑(`grid_to_lawid.parquet`) 생성/재생성
-후처리(B 단계)에서는 행정동 공간 집계를 위해 `data/geodata/grid_to_lawid.parquet`가 필요합니다.
+### (선택) 격자→법정동(읍면동) 매핑(`grid_to_emd_umd.parquet`) 생성/재생성
+후처리(B 단계)에서는 법정동 공간 집계를 위해 `data/geodata/grid_to_emd_umd.parquet`가 필요합니다.
 
 - 파일이 이미 있으면 그대로 사용됩니다.
-- 파일이 없으면 B 단계 실행 중 자동으로 생성될 수 있으나(시간이 오래 걸 수 있음), **처음 한 번은 별도로 생성/검증하는 것을 권장**합니다.
+- 파일이 없으면 B 단계 실행 중 자동으로 생성됩니다 (처음 한 번만 수행, 10~30분 소요).
+- 17개 시도별 법정동(읍면동) shapefile을 통합하여 매핑 테이블을 생성합니다.
 
 생성(없으면 생성, 있으면 로드):
 ```bash
@@ -66,39 +67,37 @@ python run_process_fusion.py --test-day 20241128 --variables ta,rn_60m
 
 - **프로젝트 루트**: `FusionConfig.project_root` (현재 코드에 하드코딩: `/Users/jaehoon/liminal_ego/git_clones/kma_api`)
 - **데이터 루트**: `data/` (`config.data_dir`)
-- **지오데이터(격자/행정동) 폴더**: `data/geodata/` (`config.geodata_dir`)
+- **지오데이터(격자/법정동) 폴더**: `data/geodata/`, `data/geodata_umd/` (`config.geodata_dir`, `config.geodata_umd_dir`)
 - **산출/중간/원천**:
   - `data/fusion_raw/` (API 원본 캐시)
   - `data/fusion_interim/` (중간 산출)
   - `data/fusion_output/` (최종 산출)
 
-**격자-행정동 매핑 관련 핵심 파일 경로:**
-- 행정동 경계 Shapefile: `data/geodata/BND_ADM_DONG_PG.shp` (`config.legal_dong_shp`)
+**격자-법정동(읍면동) 매핑 관련 핵심 파일 경로:**
+- 법정동 경계 Shapefile: `data/geodata_umd/LSMD_ADM_SECT_UMD_*/*.shp` (17개 시도별) (`config.geodata_umd_dir`)
 - 격자 위경도 NetCDF: `data/geodata/sfc_grid_latlon.nc` (`config.grid_latlon_nc`)
-- 격자→행정동 매핑 결과: `data/geodata/grid_to_lawid.parquet` (`config.grid_mapping_file`)
+- 격자→법정동 매핑 결과: `data/geodata/grid_to_emd_umd.parquet` (`config.grid_mapping_file`)
 
 ---
 
-### `data/geodata` 디렉터리 상세 설명
-현재 `data/geodata`에는 다음 파일들이 있습니다.
+### `data/geodata` 및 `data/geodata_umd` 디렉터리 상세 설명
 
-#### 1) `BND_ADM_DONG_PG.*` (행정동 경계 Shapefile 세트)
-- **구성**: `BND_ADM_DONG_PG.shp`, `BND_ADM_DONG_PG.shx`, `BND_ADM_DONG_PG.dbf`, `BND_ADM_DONG_PG.prj`, `BND_ADM_DONG_PG.cpg`
-- **역할**: 행정동(폴리곤) 경계를 제공하여 격자점(Point)이 어느 행정동 폴리곤 안에 들어가는지를 판정하는 공간조인의 기준 데이터입니다.
+#### 1) `data/geodata_umd/LSMD_ADM_SECT_UMD_*/` (법정동(읍면동) 경계 Shapefile - 시도별)
+- **구성**: 17개 시도별로 분리된 shapefile 세트
+  - 예: `LSMD_ADM_SECT_UMD_11_202602.shp` (서울), `LSMD_ADM_SECT_UMD_41_202602.shp` (경기) 등
+- **역할**: 법정동(읍면동) 폴리곤 경계를 제공하여 격자점(Point)이 어느 법정동 폴리곤 안에 들어가는지를 판정하는 공간조인의 기준 데이터입니다.
 - **실제 로딩/사용 위치**:
-  - `fusion/geocode.py`의 `GridToLawIdMapper._load_legal_dong()`
-  - `geopandas.read_file()`로 읽고, 필요시 좌표계를 `EPSG:4326`으로 변환한 뒤 `sjoin(..., predicate='within')`에 사용
-- **확인된 스키마(실제 읽어본 결과)**:
-  - 행(row) 수: 3558
-  - CRS: `EPSG:5186`
-  - 주요 컬럼: `ADM_CD`(행정동 코드), `ADM_NM`(행정동명), `BASE_DATE`, `geometry`
+  - `fusion/geocode.py`의 `GridToLawIdMapper._load_legal_dong_umd()`
+  - 17개 shapefile을 `geopandas.read_file()`로 읽어 하나로 병합
+  - 필요시 좌표계를 `EPSG:4326`으로 변환한 뒤 `sjoin(..., predicate='within')`에 사용
+- **주요 컬럼**: `EMD_CD`(읍면동코드), `EMD_NM`(읍면동명), `SGG_OID`, `COL_ADM_SECT_CD`, `geometry`
 - **코드에서 코드/명칭 컬럼을 찾는 방식**:
-  - 매핑 결과에서 코드 컬럼은 후보군 `['ADM_DR_CD','ADM_CD','EMD_CD','BJDONG_CD','LAW_ID']` 중 존재하는 것을 선택
-  - 명칭 컬럼은 후보군 `['ADM_DR_NM','ADM_NM','EMD_NM','BJDONG_NM','LAW_NM']` 중 존재하는 것을 선택
-  - 즉 현재 파일은 `ADM_CD`, `ADM_NM`가 매핑에 사용됩니다.
+  - 매핑 결과에서 코드 컬럼은 후보군 `['EMD_CD','ADM_CD','BJDONG_CD']` 중 존재하는 것을 선택
+  - 명칭 컬럼은 후보군 `['EMD_NM','ADM_NM','BJDONG_NM']` 중 존재하는 것을 선택
+  - 현재 파일은 `EMD_CD`, `EMD_NM`이 매핑에 사용됩니다.
 
 #### 2) `sfc_grid_latlon.nc` (격자 위경도 NetCDF)
-- **역할**: 기상 데이터가 제공되는 “격자”의 각 지점이 가지는 위도/경도를 제공합니다. 이 위경도가 `GridToLawIdMapper`에서 `Point(lon, lat)`로 변환되어 행정동 폴리곤과 공간조인을 수행합니다.
+- **역할**: 기상 데이터가 제공되는 "격자"의 각 지점이 가지는 위도/경도를 제공합니다. 이 위경도가 `GridToLawIdMapper`에서 `Point(lon, lat)`로 변환되어 법정동 폴리곤과 공간조인을 수행합니다.
 - **실제 로딩/사용 위치**: `fusion/geocode.py`의 `GridToLawIdMapper._load_grid_coordinates()`
 - **확인된 구조(실제 열어본 결과)**:
   - Dimensions: `(ny: 2049, nx: 2049)`
@@ -110,42 +109,43 @@ python run_process_fusion.py --test-day 20241128 --variables ta,rn_60m
     - 같은 NetCDF를 계속 쓰는 한 `grid_idx`의 의미/순서는 안정적입니다.
     - NetCDF가 바뀌면(해상도/차원/정렬 변경) `grid_idx` 의미가 바뀌므로 매핑도 재생성이 필요합니다.
 
-#### 3) `grid_to_lawid.parquet` (격자→행정동 매핑 결과 캐시)
-- **역할**: 매번 공간조인을 수행하지 않도록, 격자점마다 행정동 코드/명칭을 미리 계산해 저장한 캐시 테이블입니다.
+#### 3) `grid_to_emd_umd.parquet` (격자→법정동 매핑 결과 캐시)
+- **역할**: 매번 공간조인을 수행하지 않도록, 격자점마다 법정동(읍면동) 코드/명칭을 미리 계산해 저장한 캐시 테이블입니다.
 - **생성/갱신 위치**:
   - `fusion/geocode.py`의 `GridToLawIdMapper.build_mapping()`
-  - B 단계 실행 시 `FusionPipeline.ensure_mapping()`에서 필요하면 생성(권장: 위의 별도 생성 커맨드로 선행)
-- **스키마(코드 기준)**: `grid_idx`, `lat`, `lon`, `LAW_ID`, `LAW_NM`
+  - B 단계 실행 시 자동으로 생성 (첫 실행 시 10~30분 소요)
+- **스키마(코드 기준)**: `grid_idx`, `lat`, `lon`, `EMD_CD`, `EMD_NM`
 - **주의**:
-  - `LAW_ID`는 실제로는 이 Shapefile의 `ADM_CD`가 들어가며, 프로젝트에서는 이를 통칭해 `LAW_ID` 컬럼에 담습니다.
-  - 즉 “법정동/행정동 용어”는 데이터 원천에 따라 다를 수 있으나, 파이프라인에서는 일관되게 `LAW_ID`라는 키로 취급합니다.
+  - 파이프라인 내부에서는 호환성을 위해 `LAW_ID`, `LAW_NM` 컬럼명으로 변환하여 사용합니다.
+  - 실제 데이터는 법정동(읍면동) 기준입니다.
 
 ---
 
-### 격자 구조와 행정동 매핑 로직 (핵심)
+### 격자 구조와 법정동 매핑 로직 (핵심)
 
 #### 1) 격자 구조 (Grid)
 - **원천**: `data/geodata/sfc_grid_latlon.nc`
 - **형태**: `(ny,nx)` 2D 격자(현재 2049×2049)
-- 각 격자점은 중심 위경도(`lat`,`lon`)를 가지며, 이 점을 이용해 행정동 폴리곤 내부 포함 여부를 판정합니다.
+- 각 격자점은 중심 위경도(`lat`,`lon`)를 가지며, 이 점을 이용해 법정동 폴리곤 내부 포함 여부를 판정합니다.
 
-#### 2) 행정동 경계 (Polygon)
-- **원천**: `data/geodata/BND_ADM_DONG_PG.shp`
-- **CRS**: 원본은 `EPSG:5186`이지만, 공간조인 전에 `EPSG:4326`으로 변환될 수 있습니다.
+#### 2) 법정동 경계 (Polygon)
+- **원천**: `data/geodata_umd/LSMD_ADM_SECT_UMD_*/*.shp` (17개 시도별)
+- **CRS**: 원본 좌표계를 사용하며, 공간조인 전에 필요시 `EPSG:4326`으로 변환됩니다.
 
 #### 3) 매핑 방식: Point-in-Polygon (`within`)
 - **구현**: `fusion/geocode.py`의 `build_mapping()`
 - **절차**:
   1. NetCDF에서 모든 격자점 위경도 로드 → `grid_df(grid_idx, lat, lon)` 생성
-  2. `grid_df`를 `GeoDataFrame`으로 변환: `geometry = Point(lon, lat)`, CRS=`EPSG:4326`
-  3. 행정동 `GeoDataFrame`을 필요시 `EPSG:4326`으로 변환
-  4. `geopandas.sjoin(grid_points, dong_gdf, how='left', predicate='within')`
-     - **의미**: “격자점이 폴리곤 내부에 완전히 포함(`within`) 되는 행정동을 찾음”
+  2. 17개 시도별 법정동 shapefile을 로드하여 하나로 병합
+  3. `grid_df`를 `GeoDataFrame`으로 변환: `geometry = Point(lon, lat)`, CRS=`EPSG:4326`
+  4. 법정동 `GeoDataFrame`을 필요시 `EPSG:4326`으로 변환
+  5. `geopandas.sjoin(grid_points, dong_gdf, how='left', predicate='within')`
+     - **의미**: "격자점이 폴리곤 내부에 완전히 포함(`within`) 되는 법정동을 찾음"
 
 ---
 
-### 행정동에 매핑되지 않는 격자(미매핑 격자)와 처리 방식
-`GridToLawIdMapper.build_mapping()` 결과에서 `LAW_ID`가 `NaN`인 격자들이 “미매핑 격자”입니다.
+### 법정동에 매핑되지 않는 격자(미매핑 격자)와 처리 방식
+`GridToLawIdMapper.build_mapping()` 결과에서 `EMD_CD`가 `NaN`인 격자들이 "미매핑 격자"입니다.
 
 #### 1) 왜 미매핑이 발생하나?
 코드와 데이터 특성상 대표적으로 다음 케이스가 있습니다.

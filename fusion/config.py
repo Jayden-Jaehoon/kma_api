@@ -37,16 +37,18 @@ class FusionConfig:
     
     # 파일 경로
     @property
-    def legal_dong_shp(self) -> str:
-        return os.path.join(self.geodata_dir, "BND_ADM_DONG_PG.shp")
-    
+    def geodata_umd_dir(self) -> str:
+        """법정동(읍면동) shapefile 디렉토리 (17개 시도별로 분리)"""
+        return os.path.join(self.data_dir, "geodata_umd")
+
     @property
     def grid_latlon_nc(self) -> str:
         return os.path.join(self.geodata_dir, "sfc_grid_latlon.nc")
-    
+
     @property
     def grid_mapping_file(self) -> str:
-        return os.path.join(self.geodata_dir, "grid_to_lawid.parquet")
+        """격자-법정동(읍면동) 매핑 파일 경로"""
+        return os.path.join(self.geodata_dir, "grid_to_emd_umd.parquet")
     
     # API 설정
     api_base_url: str = "https://apihub.kma.go.kr/api/typ01"

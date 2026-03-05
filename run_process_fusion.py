@@ -1,19 +1,21 @@
-"""융합기상정보 후처리 전용 스크립트 (B 단계)
+"""융합기상정보 후처리 전용 스크립트 (B 단계) - 법정동(읍면동) 기반
 
 목표
 ----
 - A 단계에서 생성된 raw 캐시(`data/fusion_raw/.../*_parsed.parquet`)만 사용해
   피벗/공간집계/변수 병합/출력을 수행합니다.
 - 이 스크립트는 **다운로드를 절대 수행하지 않습니다.**
+- **법정동(읍면동) 경계**를 사용하여 공간 집계를 수행합니다.
 
 정책
 ----
 - 캐시 누락 날짜/변수는 스킵(B 정책)하고, 스킵 목록을 요약 출력합니다.
+- 법정동 매핑 테이블(`grid_to_emd_umd.parquet`)이 없으면 자동으로 생성합니다.
 
 예시
 ----
 python run_process_fusion.py --start-year 2024 --end-year 2024 --start-month 1 --end-month 12 --variables ta,rn_60m,sd_3hr
-python run_process_fusion.py --test-day 20241128 --variables ta,rn_60m
+python run_process_fusion.py --test-day 20241128 --variables ta,rn_60m,sd_3hr
 """
 
 from __future__ import annotations
@@ -29,13 +31,14 @@ from tqdm import tqdm
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="융합기상정보 후처리(B 단계) - 캐시 기반")
+    p = argparse.ArgumentParser(description="융합기상정보 후처리 (B 단계) - 법정동 기반")
     p.add_argument("--start-year", type=int, default=2024)
     p.add_argument("--end-year", type=int, default=2024)
     p.add_argument("--start-month", type=int, default=1)
     p.add_argument("--end-month", type=int, default=12)
     p.add_argument("--variables", type=str, default="ta,rn_60m")
     p.add_argument("--test-day", type=str, default=None, help="테스트용 하루(YYYYMMDD)만 후처리")
+    p.add_argument("--force-rebuild-mapping", action="store_true", help="법정동 매핑 테이블 강제 재생성")
     return p
 
 
@@ -64,17 +67,48 @@ def main(argv: List[str] | None = None):
 
     project_root = os.getcwd()
 
+    # 법정동 매핑 사용
     from fusion.config import FusionConfig
+    from fusion.geocode import GridToLawIdMapper
     from fusion.pipeline import FusionPipeline
+    from fusion.aggregate import SpatialAggregator
 
     config = FusionConfig(project_root=project_root)
+
+    # 법정동 매핑 테이블 생성/로드
+    print("=" * 70)
+    print("[B] 법정동(읍면동) 기반 후처리")
+    print("=" * 70)
+    print("project_root:", project_root)
+    print("법정동 매핑 파일:", config.grid_mapping_file)
+    print()
+
+    mapper = GridToLawIdMapper(config)
+
+    # 매핑 테이블이 없거나 강제 재생성 옵션이 있으면 생성
+    if args.force_rebuild_mapping or not os.path.exists(config.grid_mapping_file):
+        print("법정동 매핑 테이블 생성 중... (처음 한 번만 수행되며 시간이 걸릴 수 있습니다)")
+        grid_mapping = mapper.build_mapping(force_rebuild=args.force_rebuild_mapping)
+    else:
+        print("기존 법정동 매핑 테이블 로드 중...")
+        grid_mapping = mapper.load_mapping()
+
+    print(f"법정동 매핑 완료: {len(grid_mapping):,} 격자점")
+    print(f"법정동 개수: {grid_mapping['EMD_CD'].nunique():,}")
+    print()
+
+    # FusionPipeline 생성 (기존 파이프라인 재사용)
     pipeline = FusionPipeline(auth_key=auth_key, config=config)
-    pipeline.ensure_mapping()
+
+    # 법정동 매핑을 파이프라인에 주입
+    # OutputFormatter가 LAW_ID, LAW_NM 컬럼을 기대하므로, 컬럼명을 맞춰줍니다.
+    grid_mapping_renamed = grid_mapping.rename(columns={'EMD_CD': 'LAW_ID', 'EMD_NM': 'LAW_NM'})
+    pipeline._grid_mapping = grid_mapping_renamed
+    pipeline._spatial_agg = SpatialAggregator(grid_mapping_renamed, config)
 
     print("=" * 70)
     print("[B] 후처리(캐시 기반)")
     print("=" * 70)
-    print("project_root:", project_root)
     print("variables:", variables)
     print("start:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     print()
@@ -94,6 +128,11 @@ def main(argv: List[str] | None = None):
             return
 
         df = pipeline.process_day_from_cache(date, variables=variables, save_interim=True)
+
+        # 출력 컬럼을 다시 EMD_CD, EMD_NM으로 변경
+        if 'LAW_ID' in df.columns:
+            df = df.rename(columns={'LAW_ID': 'EMD_CD', 'LAW_NM': 'EMD_NM'})
+
         print("rows:", len(df))
         print("columns:", list(df.columns))
         print(df.head(10).to_string(index=False))
@@ -124,6 +163,9 @@ def main(argv: List[str] | None = None):
 
                 df_day = pipeline.process_day_from_cache(date, variables=variables, save_interim=True)
                 if df_day is not None and len(df_day) > 0:
+                    # 출력 컬럼을 다시 EMD_CD, EMD_NM으로 변경
+                    if 'LAW_ID' in df_day.columns:
+                        df_day = df_day.rename(columns={'LAW_ID': 'EMD_CD', 'LAW_NM': 'EMD_NM'})
                     monthly_dfs.append(df_day)
 
             if monthly_dfs:
@@ -172,7 +214,7 @@ if __name__ == "__main__":
 
     # IDE에서 Working Directory를 프로젝트 루트로 잡지 못할 때만 사용하세요.
     # (보통은 Run Configuration의 Working directory를 프로젝트 루트로 설정하는 것이 더 깔끔합니다.)
-    IDE_PROJECT_ROOT = None  # 예: "/Users/jaehoon/liminal_ego/git_clones/kma_api"
+    IDE_PROJECT_ROOT = None  # 예: "/Users/jaehoon/alphatross/git_clones/kma_api"
 
     if USE_IDE_DEFAULTS:
         if IDE_PROJECT_ROOT:
