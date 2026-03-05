@@ -1,201 +1,518 @@
-### 프로젝트 개요 (A/B 분리 실행 기준)
-이 프로젝트는 기상청 API로부터 "격자 단위" 기상 데이터를 내려받아(다운로드/캐시) 시간 집계 후, **격자 → 법정동(읍면동) 단위로 공간 집계**하여 일별 결과를 만드는 파이프라인입니다.
+# KMA Fusion Weather Data Pipeline
 
-현재 권장 실행 엔트리포인트는 아래 2개입니다.
-- A(다운로드/캐시): `run_download_fusion.py`
-- B(캐시 기반 후처리): `run_process_fusion.py`
+## Overview
 
-내부적으로 `fusion/pipeline.py`의 `FusionPipeline`과 `fusion/geocode.py`의 `GridToLawIdMapper`를 사용합니다.
+This project downloads grid-based meteorological data from the Korea Meteorological Administration (KMA) API, performs temporal aggregation, and then spatially aggregates from **grid cells to legal dong (Eup/Myeon/Dong) administrative boundaries** to produce daily weather data.
+
+The pipeline is divided into two stages:
+- **Stage A (Download/Cache)**: `run_download_fusion.py`
+- **Stage B (Post-processing)**: `run_process_fusion.py`
+
+Internally, the pipeline uses `fusion/pipeline.py`'s `FusionPipeline` and `fusion/geocode.py`'s `GridToLawIdMapper`.
 
 ---
 
-### 실행 전 준비
-**필수:** 프로젝트 루트의 `.env`에 `authKey`가 있어야 합니다.
+## Prerequisites
 
-예:
+### 1. Environment Setup
+
+Create and activate the conda environment:
+
 ```bash
-authKey=발급받은_인증키
+conda env create -f environment.yml
+conda activate kma-api
 ```
 
-### (선택) 격자→법정동(읍면동) 매핑(`grid_to_emd_umd.parquet`) 생성/재생성
-후처리(B 단계)에서는 법정동 공간 집계를 위해 `data/geodata/grid_to_emd_umd.parquet`가 필요합니다.
+### 2. API Authentication
 
-- 파일이 이미 있으면 그대로 사용됩니다.
-- 파일이 없으면 B 단계 실행 중 자동으로 생성됩니다 (처음 한 번만 수행, 10~30분 소요).
-- 17개 시도별 법정동(읍면동) shapefile을 통합하여 매핑 테이블을 생성합니다.
+**Required**: Create a `.env` file in the project root with your KMA API Hub authentication key:
 
-생성(없으면 생성, 있으면 로드):
+```bash
+authKey=your_api_key_here
+```
+
+Get your API key from [KMA API Hub](https://apihub.kma.go.kr/).
+
+### 3. Required External Data Files
+
+You need to download and place the following data files in the correct directories:
+
+#### Legal Dong (Eup/Myeon/Dong) Boundary Shapefiles
+
+**Location**: `data/geodata_umd/`
+
+**What to download**: 17 province-level legal dong shapefiles from the Korean government's geospatial data portal.
+
+**Source**: [Korean National Spatial Data Infrastructure Portal](http://data.nsdi.go.kr/)
+- Search for "법정경계(읍면동)" or "LSMD_ADM_SECT_UMD"
+- Download all 17 province shapefiles (one for each province/metropolitan city)
+
+**Expected structure**:
+```
+data/geodata_umd/
+├── LSMD_ADM_SECT_UMD_11/  # Seoul
+│   ├── LSMD_ADM_SECT_UMD_11_202602.shp
+│   ├── LSMD_ADM_SECT_UMD_11_202602.shx
+│   ├── LSMD_ADM_SECT_UMD_11_202602.dbf
+│   └── LSMD_ADM_SECT_UMD_11_202602.prj
+├── LSMD_ADM_SECT_UMD_26/  # Busan
+│   └── ...
+├── LSMD_ADM_SECT_UMD_41/  # Gyeonggi
+│   └── ...
+...
+└── LSMD_ADM_SECT_UMD_50/  # Jeju
+    └── ...
+```
+
+**Required columns**: `EMD_CD` (legal dong code), `EMD_NM` (legal dong name), `geometry`
+
+#### Grid Coordinate NetCDF File
+
+**Location**: `data/geodata/sfc_grid_latlon.nc`
+
+**What**: NetCDF file containing latitude/longitude coordinates for each grid cell in the KMA fusion weather data system.
+
+**Source**: Contact KMA API Hub support or check the API documentation for grid coordinate data.
+
+**Expected structure**:
+- Dimensions: `(ny: 2049, nx: 2049)`
+- Variables: `lat(ny, nx)`, `lon(ny, nx)`
+- CRS information: Lambert Conformal Conic projection attributes
+
+**Note**: This file defines the mapping between grid indices and geographic coordinates. If you update this file, you must regenerate the grid-to-legal-dong mapping.
+
+---
+
+## Grid-to-Legal-Dong Mapping
+
+### Automatic Generation
+
+The post-processing stage (B) requires a grid-to-legal-dong mapping file: `data/geodata/grid_to_emd_umd.parquet`
+
+- If the file exists, it will be loaded automatically
+- If the file doesn't exist, it will be generated automatically on first run (10-30 minutes, one-time operation)
+- The mapping integrates all 17 province shapefiles and performs point-in-polygon spatial join
+
+### Manual Generation
+
+Generate mapping (creates if missing, loads if exists):
 ```bash
 python -c "import os; from fusion.config import FusionConfig; from fusion.geocode import GridToLawIdMapper; cfg=FusionConfig(project_root=os.getcwd()); GridToLawIdMapper(cfg).build_mapping(force_rebuild=False)"
 ```
 
-재생성(강제):
+Force regenerate mapping:
 ```bash
 python -c "import os; from fusion.config import FusionConfig; from fusion.geocode import GridToLawIdMapper; cfg=FusionConfig(project_root=os.getcwd()); GridToLawIdMapper(cfg).build_mapping(force_rebuild=True)"
 ```
 
+Or use the `--force-rebuild-mapping` flag when running `run_process_fusion.py`.
+
 ---
 
-### 권장 실행 흐름: A(다운로드/캐시) → B(후처리) 분리
-대용량 전체격자 API 호출은 시간이 오래 걸리고, 중간 실패 시 재시도/로그 관리가 중요합니다.
-따라서 **다운로드 단계(A)** 와 **캐시 기반 후처리 단계(B)** 를 분리해 운용하는 것을 권장합니다.
+## Usage
 
-#### A) raw 다운로드/캐시 생성: `run_download_fusion.py`
-- 목적: `data/fusion_raw/YYYY/MM/{var}_{date}_parsed.parquet`를 먼저 채웁니다.
-- 특징: **날짜 단위 병렬 처리**(기본 `--max-workers 4`)
+### Recommended Workflow: A (Download) → B (Post-processing)
 
-예:
+Large-scale grid API calls are time-consuming and require careful retry/logging management. Therefore, we recommend separating the **download stage (A)** and **cache-based post-processing stage (B)**.
+
+### Stage A: Raw Data Download/Caching
+
+**Script**: `run_download_fusion.py`
+
+**Purpose**: Populate `data/fusion_raw/YYYY/MM/{var}_{date}_parsed.parquet` cache files
+
+**Features**:
+- Date-level parallel processing (default `--max-workers 4`)
+- Automatic retry with exponential backoff
+- Validation logging to `data/fusion_raw/_validation_logs/`
+
+**Examples**:
+
+Download specific date range:
 ```bash
-python run_download_fusion.py --start-year 2024 --end-year 2024 --start-month 6 --end-month 7 --variables ta,rn_60m,sd_3hr
-python run_download_fusion.py --test-day 20241128 --variables ta,rn_60m
+python run_download_fusion.py \
+  --start-year 2024 \
+  --end-year 2024 \
+  --start-month 6 \
+  --end-month 7 \
+  --variables ta,rn_60m,sd_3hr \
+  --max-workers 4
 ```
 
-#### B) 캐시 기반 후처리(피벗/공간집계/출력): `run_process_fusion.py`
-- 목적: A 단계에서 만들어진 `*_parsed.parquet`만 사용해 `data/fusion_interim`, `data/fusion_output`을 생성합니다.
-- 정책: **캐시가 누락된 날짜/변수는 스킵(B 정책)** 하고 요약을 출력합니다.
-
-예:
+Test with single day:
 ```bash
-python run_process_fusion.py --start-year 2024 --end-year 2024 --start-month 6 --end-month 7 --variables ta,rn_60m,sd_3hr
-python run_process_fusion.py --test-day 20241128 --variables ta,rn_60m
+python run_download_fusion.py \
+  --test-day 20241128 \
+  --variables ta,rn_60m
+```
+
+**Parameters**:
+- `--start-year`, `--end-year`: Year range (inclusive)
+- `--start-month`, `--end-month`: Month range (inclusive)
+- `--variables`: Comma-separated variable list (ta, rn_60m, sd_3hr)
+- `--test-day`: Single day test mode (YYYYMMDD format)
+- `--max-workers`: Number of parallel workers for date-level processing
+
+### Stage B: Cache-Based Post-Processing
+
+**Script**: `run_process_fusion.py`
+
+**Purpose**: Use cached `*_parsed.parquet` files to generate `data/fusion_interim` and `data/fusion_output` results
+
+**Policy**: Skips dates/variables with missing cache files (B policy) and outputs summary
+
+**Examples**:
+
+Process date range:
+```bash
+python run_process_fusion.py \
+  --start-year 2024 \
+  --end-year 2024 \
+  --start-month 6 \
+  --end-month 7 \
+  --variables ta,rn_60m,sd_3hr
+```
+
+Test with single day:
+```bash
+python run_process_fusion.py \
+  --test-day 20241128 \
+  --variables ta,rn_60m
+```
+
+Force rebuild mapping:
+```bash
+python run_process_fusion.py \
+  --test-day 20241128 \
+  --variables ta,rn_60m \
+  --force-rebuild-mapping
+```
+
+**Parameters**:
+- `--start-year`, `--end-year`: Year range (inclusive)
+- `--start-month`, `--end-month`: Month range (inclusive)
+- `--variables`: Comma-separated variable list
+- `--test-day`: Single day test mode (YYYYMMDD format)
+- `--force-rebuild-mapping`: Force regenerate grid-to-legal-dong mapping
+
+---
+
+## Project Structure
+
+```
+kma_api/
+├── data/
+│   ├── geodata/                      # Geospatial reference data
+│   │   ├── sfc_grid_latlon.nc        # Grid coordinates (REQUIRED)
+│   │   └── grid_to_emd_umd.parquet   # Grid-to-legal-dong mapping (auto-generated)
+│   ├── geodata_umd/                  # Legal dong boundaries (REQUIRED)
+│   │   ├── LSMD_ADM_SECT_UMD_11/     # Seoul
+│   │   ├── LSMD_ADM_SECT_UMD_26/     # Busan
+│   │   ├── LSMD_ADM_SECT_UMD_41/     # Gyeonggi
+│   │   └── ...                       # Other 14 provinces
+│   ├── fusion_raw/                   # Raw API cache (Stage A output)
+│   │   ├── YYYY/MM/                  # Organized by year/month
+│   │   │   ├── ta_YYYYMMDD_parsed.parquet
+│   │   │   ├── rn_60m_YYYYMMDD_parsed.parquet
+│   │   │   └── sd_3hr_YYYYMMDD_parsed.parquet
+│   │   └── _validation_logs/         # Validation/error logs
+│   ├── fusion_interim/               # Intermediate results (Stage B output)
+│   │   └── YYYY/
+│   │       └── fusion_YYYYMMDD.parquet
+│   └── fusion_output/                # Final CSV outputs (Stage B output)
+│       ├── YYYY/
+│       │   └── fusion_YYYYMM.csv     # Monthly data
+│       └── fusion_weather_YYYY.csv   # Yearly data
+├── fusion/                           # Core modules
+│   ├── config.py                     # Configuration
+│   ├── geocode.py                    # Grid-to-legal-dong mapping
+│   ├── download.py                   # API downloader
+│   ├── aggregate.py                  # Temporal & spatial aggregation
+│   └── pipeline.py                   # Main pipeline orchestration
+├── run_download_fusion.py            # Stage A: Download script
+├── run_process_fusion.py             # Stage B: Post-processing script
+├── environment.yml                   # Conda environment specification
+├── .env                              # API key (create this, not in git)
+└── README.md                         # This file
 ```
 
 ---
 
-### 데이터/설정의 “기준 경로” (`fusion/config.py`)
-설정은 `fusion/config.py`의 `FusionConfig`에 모여 있으며, 핵심 경로는 다음과 같습니다.
+## Configuration
 
-- **프로젝트 루트**: `FusionConfig.project_root` (현재 코드에 하드코딩: `/Users/jaehoon/liminal_ego/git_clones/kma_api`)
-- **데이터 루트**: `data/` (`config.data_dir`)
-- **지오데이터(격자/법정동) 폴더**: `data/geodata/`, `data/geodata_umd/` (`config.geodata_dir`, `config.geodata_umd_dir`)
-- **산출/중간/원천**:
-  - `data/fusion_raw/` (API 원본 캐시)
-  - `data/fusion_interim/` (중간 산출)
-  - `data/fusion_output/` (최종 산출)
+All settings are in `fusion/config.py` (`FusionConfig` class):
 
-**격자-법정동(읍면동) 매핑 관련 핵심 파일 경로:**
-- 법정동 경계 Shapefile: `data/geodata_umd/LSMD_ADM_SECT_UMD_*/*.shp` (17개 시도별) (`config.geodata_umd_dir`)
-- 격자 위경도 NetCDF: `data/geodata/sfc_grid_latlon.nc` (`config.grid_latlon_nc`)
-- 격자→법정동 매핑 결과: `data/geodata/grid_to_emd_umd.parquet` (`config.grid_mapping_file`)
+### Key Paths
 
----
+- **Project root**: `FusionConfig.project_root`
+- **Data root**: `data/`
+- **Geodata**: `data/geodata/`, `data/geodata_umd/`
+- **Raw cache**: `data/fusion_raw/` (API cache)
+- **Interim**: `data/fusion_interim/` (intermediate results)
+- **Output**: `data/fusion_output/` (final CSV files)
 
-### `data/geodata` 및 `data/geodata_umd` 디렉터리 상세 설명
+### Core Files
 
-#### 1) `data/geodata_umd/LSMD_ADM_SECT_UMD_*/` (법정동(읍면동) 경계 Shapefile - 시도별)
-- **구성**: 17개 시도별로 분리된 shapefile 세트
-  - 예: `LSMD_ADM_SECT_UMD_11_202602.shp` (서울), `LSMD_ADM_SECT_UMD_41_202602.shp` (경기) 등
-- **역할**: 법정동(읍면동) 폴리곤 경계를 제공하여 격자점(Point)이 어느 법정동 폴리곤 안에 들어가는지를 판정하는 공간조인의 기준 데이터입니다.
-- **실제 로딩/사용 위치**:
-  - `fusion/geocode.py`의 `GridToLawIdMapper._load_legal_dong_umd()`
-  - 17개 shapefile을 `geopandas.read_file()`로 읽어 하나로 병합
-  - 필요시 좌표계를 `EPSG:4326`으로 변환한 뒤 `sjoin(..., predicate='within')`에 사용
-- **주요 컬럼**: `EMD_CD`(읍면동코드), `EMD_NM`(읍면동명), `SGG_OID`, `COL_ADM_SECT_CD`, `geometry`
-- **코드에서 코드/명칭 컬럼을 찾는 방식**:
-  - 매핑 결과에서 코드 컬럼은 후보군 `['EMD_CD','ADM_CD','BJDONG_CD']` 중 존재하는 것을 선택
-  - 명칭 컬럼은 후보군 `['EMD_NM','ADM_NM','BJDONG_NM']` 중 존재하는 것을 선택
-  - 현재 파일은 `EMD_CD`, `EMD_NM`이 매핑에 사용됩니다.
-
-#### 2) `sfc_grid_latlon.nc` (격자 위경도 NetCDF)
-- **역할**: 기상 데이터가 제공되는 "격자"의 각 지점이 가지는 위도/경도를 제공합니다. 이 위경도가 `GridToLawIdMapper`에서 `Point(lon, lat)`로 변환되어 법정동 폴리곤과 공간조인을 수행합니다.
-- **실제 로딩/사용 위치**: `fusion/geocode.py`의 `GridToLawIdMapper._load_grid_coordinates()`
-- **확인된 구조(실제 열어본 결과)**:
-  - Dimensions: `(ny: 2049, nx: 2049)`
-  - Data variables: `lat (ny,nx)`, `lon (ny,nx)`
-  - Attributes: Lambert Conformal Conic 관련 속성(`map_pro`, `map_slon`, `map_slat`, `grid_size` 등)
-- **“격자 인덱스(grid_idx)” 정의**:
-  - 코드에서 `lat`/`lon`이 2D 배열이면 flatten하여 1차원으로 만들고, `grid_idx = range(len(lat_flat))`로 0부터 순차 부여합니다.
-  - 따라서 `grid_idx`는 “(ny,nx) 2D 격자에서 flatten한 순서”에 종속됩니다.
-    - 같은 NetCDF를 계속 쓰는 한 `grid_idx`의 의미/순서는 안정적입니다.
-    - NetCDF가 바뀌면(해상도/차원/정렬 변경) `grid_idx` 의미가 바뀌므로 매핑도 재생성이 필요합니다.
-
-#### 3) `grid_to_emd_umd.parquet` (격자→법정동 매핑 결과 캐시)
-- **역할**: 매번 공간조인을 수행하지 않도록, 격자점마다 법정동(읍면동) 코드/명칭을 미리 계산해 저장한 캐시 테이블입니다.
-- **생성/갱신 위치**:
-  - `fusion/geocode.py`의 `GridToLawIdMapper.build_mapping()`
-  - B 단계 실행 시 자동으로 생성 (첫 실행 시 10~30분 소요)
-- **스키마(코드 기준)**: `grid_idx`, `lat`, `lon`, `EMD_CD`, `EMD_NM`
-- **주의**:
-  - 파이프라인 내부에서는 호환성을 위해 `LAW_ID`, `LAW_NM` 컬럼명으로 변환하여 사용합니다.
-  - 실제 데이터는 법정동(읍면동) 기준입니다.
+- **Legal dong boundaries**: `data/geodata_umd/LSMD_ADM_SECT_UMD_*/*.shp` (17 provinces)
+- **Grid coordinates**: `data/geodata/sfc_grid_latlon.nc`
+- **Grid mapping**: `data/geodata/grid_to_emd_umd.parquet`
 
 ---
 
-### 격자 구조와 법정동 매핑 로직 (핵심)
+## Data Variables
 
-#### 1) 격자 구조 (Grid)
-- **원천**: `data/geodata/sfc_grid_latlon.nc`
-- **형태**: `(ny,nx)` 2D 격자(현재 2049×2049)
-- 각 격자점은 중심 위경도(`lat`,`lon`)를 가지며, 이 점을 이용해 법정동 폴리곤 내부 포함 여부를 판정합니다.
+### Available Variables
 
-#### 2) 법정동 경계 (Polygon)
-- **원천**: `data/geodata_umd/LSMD_ADM_SECT_UMD_*/*.shp` (17개 시도별)
-- **CRS**: 원본 좌표계를 사용하며, 공간조인 전에 필요시 `EPSG:4326`으로 변환됩니다.
+| Variable | Description | Unit | Temporal Resolution | Start Year | Notes |
+|----------|-------------|------|---------------------|------------|-------|
+| `ta` | Temperature | ℃ | 1-hour | 1997 | Mean aggregation |
+| `rn_60m` | 60-min Precipitation | mm | 1-hour | 1997 | Cumulative value |
+| `sd_3hr` | 3-hour New Snowfall | cm | 3-hour | 2020 | Seasonal (Oct-May only) |
 
-#### 3) 매핑 방식: Point-in-Polygon (`within`)
-- **구현**: `fusion/geocode.py`의 `build_mapping()`
-- **절차**:
-  1. NetCDF에서 모든 격자점 위경도 로드 → `grid_df(grid_idx, lat, lon)` 생성
-  2. 17개 시도별 법정동 shapefile을 로드하여 하나로 병합
-  3. `grid_df`를 `GeoDataFrame`으로 변환: `geometry = Point(lon, lat)`, CRS=`EPSG:4326`
-  4. 법정동 `GeoDataFrame`을 필요시 `EPSG:4326`으로 변환
-  5. `geopandas.sjoin(grid_points, dong_gdf, how='left', predicate='within')`
-     - **의미**: "격자점이 폴리곤 내부에 완전히 포함(`within`) 되는 법정동을 찾음"
+### Output Column Format
+
+**Temperature**: `t0001`, `t0102`, ..., `t2324` (24 columns, hourly)
+**Precipitation**: `p0001`, `p0102`, ..., `p2324` (24 columns, hourly)
+**Snowfall**: `s0003`, `s0306`, ..., `s2124` (8 columns, 3-hourly)
+
+Column naming: `{prefix}{start_hour:02d}{end_hour:02d}`
 
 ---
 
-### 법정동에 매핑되지 않는 격자(미매핑 격자)와 처리 방식
-`GridToLawIdMapper.build_mapping()` 결과에서 `EMD_CD`가 `NaN`인 격자들이 "미매핑 격자"입니다.
+## Geospatial Mapping Logic
 
-#### 1) 왜 미매핑이 발생하나?
-코드와 데이터 특성상 대표적으로 다음 케이스가 있습니다.
-- **해양(바다) 격자**: 행정동 폴리곤은 육지 중심이므로 바다 위 격자점은 어떤 폴리곤에도 속하지 않음
-- **북한/국외 등 경계 밖**: Shapefile이 커버하지 않는 영역의 격자
-- **경계선 위의 점**: `predicate='within'`은 “경계선 위(on boundary)”를 내부로 보지 않는 경우가 있어, 경계 부근 격자점이 미매핑될 수 있음
-- **(드물게) 좌표계/정합 문제**: 폴리곤 또는 위경도 데이터의 정합 오류/누락
+### Grid Structure
 
-#### 2) 미매핑 격자는 어떻게 보관되나?
-- `grid_to_lawid.parquet`에는 미매핑 격자도 행으로 존재하며, `LAW_ID`/`LAW_NM`만 `NaN`으로 남습니다.
-- `build_mapping()` 실행 시 통계로 `매핑 성공` / `매핑 실패 (해양/북한 등)`을 출력합니다.
+- **Source**: `data/geodata/sfc_grid_latlon.nc`
+- **Format**: `(ny, nx)` 2D grid (currently 2049×2049)
+- Each grid cell has center coordinates `(lat, lon)` used for spatial join
 
-#### 3) 실제 집계 단계에서 미매핑 격자는 어떻게 처리되나?
-- `fusion/aggregate.py`의 `SpatialAggregator.aggregate_grid_to_lawid()`에서
-  1. 격자 데이터에 매핑을 `left merge`로 붙인 뒤
-  2. `LAW_ID`가 `NaN`인 행을 집계 전에 제거합니다: `df_with_lawid = df_with_lawid[df_with_lawid['LAW_ID'].notna()]`
-- 즉 최종 “행정동별 결과”에는 미매핑 격자 기여분이 포함되지 않습니다.
+### Legal Dong Boundaries
 
-#### 4) 강수/적설 vs 기온: 결측 처리의 차이
-공간 집계 직전에 변수 성격에 따라 결측 처리 정책이 다릅니다.
-- **강수/적설(`p*`, `s*` 컬럼)**: `NaN`을 `0`으로 간주 (`fillna(0)`)
-  - “관측/산출이 없는 곳은 현상이 없다고 본다”는 정책
-- **기온 등(`t*`)**: `NaN` 유지
-  - 평균 계산 시 `NaN`은 자동 제외되어 왜곡을 줄임
+- **Source**: `data/geodata_umd/LSMD_ADM_SECT_UMD_*/*.shp` (17 provinces)
+- **CRS**: Original CRS preserved, converted to `EPSG:4326` for spatial join if needed
 
----
+### Mapping Method: Point-in-Polygon (`within`)
 
-### 파이프라인에서 매핑이 쓰이는 지점 (큰 흐름)
-1. (실행 스크립트에서) `FusionPipeline(auth_key, config)` 생성
-2. `FusionPipeline.ensure_mapping()`
-   - 내부에서 `GridToLawIdMapper.build_mapping()` 실행(또스 `grid_to_lawid.parquet` 로드)
-   - `SpatialAggregator(self._grid_mapping, config)` 준비
-3. 이후 일별 처리(`FusionPipeline.process_day()` 등)에서
-   - 시간 집계된 격자 데이터에 대해 `SpatialAggregator.aggregate_grid_to_lawid()`로 행정동별 집계
-   - 최종적으로 `OutputFormatter`가 변수 병합/컬럼 정렬을 수행
-   - 필요하면 `OutputFormatter.add_lawid_name(df, grid_mapping)`으로 `LAW_NM`을 덧붙일 수 있음
+**Implementation**: `fusion/geocode.py` → `GridToLawIdMapper.build_mapping()`
 
----
+**Process**:
+1. Load all grid cell coordinates from NetCDF → `grid_df(grid_idx, lat, lon)`
+2. Load and merge 17 province shapefiles
+3. Convert `grid_df` to `GeoDataFrame`: `geometry = Point(lon, lat)`, CRS=`EPSG:4326`
+4. Convert legal dong `GeoDataFrame` to `EPSG:4326` if needed
+5. Perform spatial join: `geopandas.sjoin(grid_points, dong_gdf, how='left', predicate='within')`
+   - **Meaning**: "Find which legal dong polygon completely contains this grid point"
 
-### 운영/갱신 시 실무 체크리스트 (특히 `data/geodata`)
-- **`sfc_grid_latlon.nc`를 교체/갱신하면**: 격자 구조(차원/순서)가 바뀔 수 있으므로 **반드시 `grid_to_lawid.parquet` 재생성** 권장
-- **`BND_ADM_DONG_PG.*`를 교체/갱신하면**: `ADM_CD`/`ADM_NM` 체계가 바뀌거나 경계가 업데이트될 수 있으므로 **재매핑 필요**
-- **미매핑 격자 비율이 과도하게 높다면**: (1) Shapefile 커버리지, (2) 좌표계 변환, (3) `within` 경계 판정 특성(경계점) 이슈를 우선 의심
+### Unmapped Grid Cells
+
+Grid cells with `NaN` in `EMD_CD` are "unmapped" and typically represent:
+- **Ocean/sea areas**: Legal dong polygons cover land only
+- **North Korea/outside boundaries**: Areas not covered by shapefiles
+- **Boundary edge points**: `predicate='within'` may not include points exactly on polygon boundaries
+- **(Rare) Coordinate/alignment issues**: Data quality issues
+
+**Storage**: Unmapped cells are retained in `grid_to_emd_umd.parquet` with `EMD_CD`/`EMD_NM` = `NaN`
+
+**Processing**: During spatial aggregation (`fusion/aggregate.py`), rows with `EMD_CD = NaN` are removed before aggregation, so they don't contribute to final legal dong results.
+
+### Missing Data Handling by Variable Type
+
+During spatial aggregation, different variables handle missing data differently:
+- **Precipitation/Snowfall** (`p*`, `s*` columns): `NaN` → `0` (assumption: no observation = no phenomenon)
+- **Temperature** (`t*` columns): `NaN` preserved (excluded from mean calculation to avoid bias)
 
 ---
 
-### 참고: 관련 파일 위치 요약
-- **실행(A/B)**: `run_download_fusion.py`, `run_process_fusion.py`
-- **설정**: `fusion/config.py`
-- **격자→행정동 매핑**: `fusion/geocode.py`
-- **공간 집계(미매핑 제거 포함)**: `fusion/aggregate.py` (`SpatialAggregator`)
-- **파이프라인**: `fusion/pipeline.py`
-- **지오데이터**: `data/geodata/` (`BND_ADM_DONG_PG.*`, `sfc_grid_latlon.nc`, `grid_to_lawid.parquet`)
+## Pipeline Workflow
+
+### Stage A: Download (Parallel)
+
+```
+run_download_fusion.py
+    ↓
+For each date (parallel workers):
+    For each hour:
+        API call → validate → retry if needed
+        Parse grid response → strict validation
+        Save to: fusion_raw/YYYY/MM/{var}_{date}_parsed.parquet
+    Log failures to: fusion_raw/_validation_logs/YYYY/MM/{date}_{var}.txt
+```
+
+### Stage B: Post-Processing (Sequential by date)
+
+```
+run_process_fusion.py
+    ↓
+Load/build grid-to-legal-dong mapping
+    ↓
+For each date:
+    Load cached parquet files (skip if missing)
+    Temporal aggregation (already 1-hour/3-hour in cache)
+    Pivot: time → columns (t0001, t0102, ...)
+    Spatial aggregation: grid → legal dong (mean of grid cells in each dong)
+    Remove unmapped grid cells (EMD_CD = NaN)
+    Merge variables (temperature, precipitation, snowfall)
+    Save:
+        - Interim: fusion_interim/YYYY/fusion_YYYYMMDD.parquet
+        - Monthly: fusion_output/YYYY/fusion_YYYYMM.csv
+        - Yearly: fusion_output/fusion_weather_YYYY.csv
+```
+
+---
+
+## Operational Notes
+
+### When to Regenerate Grid Mapping
+
+**Regenerate `grid_to_emd_umd.parquet` if**:
+- `sfc_grid_latlon.nc` is updated/replaced (grid structure/dimensions changed)
+- Legal dong shapefiles are updated (boundary changes)
+- High unmapped grid cell ratio (check data quality)
+
+**Command**:
+```bash
+python run_process_fusion.py --force-rebuild-mapping --test-day 20241128 --variables ta
+```
+
+### Validation Logs
+
+All download/parsing failures are logged to:
+```
+data/fusion_raw/_validation_logs/YYYY/MM/{date}_{var}.txt
+```
+
+Each log entry includes:
+- Timestamp
+- Severity level (INFO, WARN, ERROR)
+- Time code (tm)
+- Error message
+- Response preview (for debugging)
+
+### Missing Cache Files (B Stage)
+
+When running Stage B, if cache files are missing:
+- Date/variable is skipped (not an error)
+- Summary printed at end showing all skipped items
+- Re-run Stage A for missing dates to fill cache
+
+---
+
+## Troubleshooting
+
+### Problem: "ModuleNotFoundError: No module named 'geopandas'"
+
+**Solution**: Create conda environment:
+```bash
+conda env create -f environment.yml
+conda activate kma-api
+```
+
+### Problem: "grid_to_emd_umd.parquet not found"
+
+**Solution**: File will auto-generate on first B stage run (10-30 min). Or manually generate:
+```bash
+python run_process_fusion.py --force-rebuild-mapping --test-day 20241128 --variables ta
+```
+
+### Problem: "HTTP 403 Forbidden" during download
+
+**Solution**:
+1. Check `.env` file has correct `authKey`
+2. Verify API permissions at [KMA API Hub My Page](https://apihub.kma.go.kr/mypage)
+3. Ensure the specific variable (`ta`, `rn_60m`, `sd_3hr`) is enabled for your API key
+
+### Problem: High number of unmapped grid cells
+
+**Solution**:
+1. Verify legal dong shapefiles are complete (all 17 provinces)
+2. Check CRS compatibility in shapefiles (should auto-convert to EPSG:4326)
+3. Review grid coordinate file (`sfc_grid_latlon.nc`) coverage
+4. Consider tolerance for ocean/boundary cells (this is expected)
+
+### Problem: Missing data in summer months for snowfall
+
+**Expected behavior**: Snowfall (`sd_3hr`) is only produced October-May. Pipeline automatically skips `sd_3hr` for months 6-9.
+
+### Problem: Download failures/retries
+
+**Check**:
+1. Validation logs: `data/fusion_raw/_validation_logs/`
+2. Network connectivity
+3. API rate limits (default: 0.5s between calls)
+4. Retry settings in `fusion/config.py`:
+   - `download_retry_attempts` (default: 3)
+   - `download_retry_initial_sleep_seconds` (default: 10.0)
+   - `download_retry_backoff` (default: 2.0)
+
+---
+
+## Technical Details
+
+### Grid Index (`grid_idx`)
+
+- **Definition**: Sequential index (0 to N-1) assigned after flattening `(ny, nx)` 2D grid coordinates
+- **Stability**: Stable as long as `sfc_grid_latlon.nc` dimensions/structure unchanged
+- **Change impact**: If NetCDF changes (resolution/ordering), grid_idx meaning changes → regenerate mapping
+
+### Legal Dong Codes
+
+- **Format**: `EMD_CD` (e.g., "1111010100" - 10-digit code)
+- **Hierarchy**: Province(2) + City(3) + Legal dong(5)
+- **Name**: `EMD_NM` (Korean name, e.g., "청운효자동")
+
+### Column Name Mapping (Internal)
+
+- **Source data**: Uses `EMD_CD`, `EMD_NM`
+- **Internal pipeline**: Renames to `LAW_ID`, `LAW_NM` for compatibility
+- **Output files**: Converted back to `EMD_CD`, `EMD_NM`
+
+### CRS Handling
+
+- **Grid coordinates**: Assumed `EPSG:4326` (WGS84)
+- **Shapefiles**: Original CRS preserved, auto-converted to `EPSG:4326` for spatial join
+- **Spatial join**: All operations in `EPSG:4326`
+
+---
+
+## Data Sources & References
+
+### KMA API Hub
+- **Website**: https://apihub.kma.go.kr/
+- **Documentation**: https://apihub.kma.go.kr/api/guide
+- **Variables**: Fusion weather data (격자형 융합기상정보)
+
+### Legal Dong Boundaries
+- **Source**: National Spatial Data Infrastructure Portal (국가공간정보포털)
+- **Website**: http://data.nsdi.go.kr/
+- **Dataset**: 법정경계(읍면동) / LSMD_ADM_SECT_UMD
+- **Update**: Check for quarterly/annual updates
+
+### Grid Coordinates
+- **Source**: KMA API Hub documentation or support
+- **File**: `sfc_grid_latlon.nc`
+- **Projection**: Lambert Conformal Conic (LCC)
+
+---
+
+## Contributing
+
+This is a data processing pipeline project. For contributions:
+1. Maintain A/B stage separation
+2. Preserve validation/logging for production reliability
+3. Update mapping generation if adding new geospatial sources
+4. Document any configuration changes in `fusion/config.py`
+
+---
+
+## License
+
+Project license and terms TBD.
+
+---
+
+## Contact
+
+For KMA API access issues: https://apihub.kma.go.kr/support
+
+For pipeline issues: Check validation logs in `data/fusion_raw/_validation_logs/`

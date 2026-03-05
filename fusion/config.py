@@ -1,5 +1,5 @@
 """
-융합기상정보 설정
+Fusion Weather Information Configuration
 """
 
 import os
@@ -9,36 +9,36 @@ from typing import List, Dict
 
 @dataclass
 class FusionConfig:
-    """융합기상정보 처리 설정"""
-    
-    # 프로젝트 경로
+    """Fusion weather information processing configuration"""
+
+    # Project root path
     project_root: str = "/Users/jaehoon/liminal_ego/git_clones/kma_api"
-    
-    # 데이터 경로
+
+    # Data paths
     @property
     def data_dir(self) -> str:
         return os.path.join(self.project_root, "data")
-    
+
     @property
     def geodata_dir(self) -> str:
         return os.path.join(self.data_dir, "geodata")
-    
+
     @property
     def fusion_raw_dir(self) -> str:
         return os.path.join(self.data_dir, "fusion_raw")
-    
+
     @property
     def fusion_interim_dir(self) -> str:
         return os.path.join(self.data_dir, "fusion_interim")
-    
+
     @property
     def fusion_output_dir(self) -> str:
         return os.path.join(self.data_dir, "fusion_output")
-    
-    # 파일 경로
+
+    # File paths
     @property
     def geodata_umd_dir(self) -> str:
-        """법정동(읍면동) shapefile 디렉토리 (17개 시도별로 분리)"""
+        """Legal dong (Eup/Myeon/Dong) shapefile directory (separated by 17 provinces)"""
         return os.path.join(self.data_dir, "geodata_umd")
 
     @property
@@ -47,76 +47,76 @@ class FusionConfig:
 
     @property
     def grid_mapping_file(self) -> str:
-        """격자-법정동(읍면동) 매핑 파일 경로"""
+        """Grid-to-legal-dong mapping file path"""
         return os.path.join(self.geodata_dir, "grid_to_emd_umd.parquet")
-    
-    # API 설정
-    api_base_url: str = "https://apihub.kma.go.kr/api/typ01"
-    max_query_minutes: int = 60  # API 최대 조회 기간 (분)
-    api_sleep_seconds: float = 0.5  # API 호출 간격
 
-    # 다운로드 재시도 설정
-    # - 네트워크 일시 장애(ChunkedEncodingError 등)나 간헐적인 API 오류에 대비합니다.
-    # - 최종적으로도 실패하면 상위 루프(process_month 등)에서 날짜를 건너뛰도록 예외가 전파됩니다.
-    download_retry_attempts: int = 3  # 총 시도 횟수(= 1회 요청 + 재시도)
-    download_retry_initial_sleep_seconds: float = 10.0  # 1회 실패 후 대기(초)
-    download_retry_backoff: float = 2.0  # 재시도 대기시간 배수(지수 backoff)
+    # API configuration
+    api_base_url: str = "https://apihub.kma.go.kr/api/typ01"
+    max_query_minutes: int = 60  # Maximum API query period (minutes)
+    api_sleep_seconds: float = 0.5  # API call interval
+
+    # Download retry configuration
+    # - Handles temporary network failures (ChunkedEncodingError, etc.) and intermittent API errors
+    # - If all retries fail, the exception propagates to the upper loop (process_month, etc.) to skip the date
+    download_retry_attempts: int = 3  # Total number of attempts (= 1 initial request + retries)
+    download_retry_initial_sleep_seconds: float = 10.0  # Wait time after first failure (seconds)
+    download_retry_backoff: float = 2.0  # Retry wait time multiplier (exponential backoff)
     
-    # 변수 설정
+    # Variable configuration
     variables: Dict[str, Dict] = field(default_factory=lambda: {
         'ta': {
-            'name': '기온',
+            'name': 'Temperature',
             'unit': '℃',
-            'hourly_agg': 'mean',  # 1시간 집계: 평균
+            'hourly_agg': 'mean',  # 1-hour aggregation: mean
             'col_prefix': 't',
-            'hours': 24,  # 24개 컬럼
+            'hours': 24,  # 24 columns
         },
         'rn_60m': {
-            'name': '60분강수량',
+            'name': '60-min Precipitation',
             'unit': 'mm',
-            'hourly_agg': 'last',  # 이미 60분 누적값
+            'hourly_agg': 'last',  # Already 60-min cumulative value
             'col_prefix': 'p',
             'hours': 24,
         },
         'sd_3hr': {
-            'name': '3시간신적설',
+            'name': '3-hour New Snowfall',
             'unit': 'cm',
-            'hourly_agg': 'last',  # 3시간 단위 그대로
+            'hourly_agg': 'last',  # 3-hour interval as is
             'col_prefix': 's',
-            'hours': 8,  # 8개 컬럼 (3시간 단위)
-            'seasonal': True,  # 10월~5월만 (여름철 미생산)
-            'start_year': 2020,  # 2020년부터 제공
+            'hours': 8,  # 8 columns (3-hour intervals)
+            'seasonal': True,  # October-May only (not produced in summer)
+            'start_year': 2020,  # Available from 2020
         },
     })
-    
-    # 데이터 기간
+
+    # Data period
     data_start_year: int = 1997
-    snow_start_year: int = 2020  # 적설 데이터 시작 연도
-    
+    snow_start_year: int = 2020  # Snowfall data start year
+
     def ensure_dirs(self):
-        """필요한 디렉토리 생성"""
+        """Create necessary directories"""
         for dir_path in [
             self.fusion_raw_dir,
             self.fusion_interim_dir,
             self.fusion_output_dir,
         ]:
             os.makedirs(dir_path, exist_ok=True)
-    
+
     def get_hourly_columns(self, var_key: str) -> List[str]:
-        """변수별 시간 컬럼명 리스트 반환"""
+        """Return list of hourly column names for each variable"""
         var_info = self.variables[var_key]
         prefix = var_info['col_prefix']
         hours = var_info['hours']
-        
+
         if hours == 24:
-            # 1시간 단위: t0001, t0102, ..., t2324
+            # 1-hour intervals: t0001, t0102, ..., t2324
             return [f"{prefix}{h:02d}{(h+1) % 24:02d}" for h in range(24)]
         elif hours == 8:
-            # 3시간 단위: s0003, s0306, ..., s2124
+            # 3-hour intervals: s0003, s0306, ..., s2124
             return [f"{prefix}{h*3:02d}{(h+1)*3:02d}" for h in range(8)]
         else:
             raise ValueError(f"Unsupported hours: {hours}")
 
 
-# 기본 설정 인스턴스
+# Default configuration instance
 DEFAULT_CONFIG = FusionConfig()
