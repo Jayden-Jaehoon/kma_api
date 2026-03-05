@@ -265,11 +265,11 @@ All settings are in `fusion/config.py` (`FusionConfig` class):
 
 ### Available Variables
 
-| Variable | Description | Unit | Temporal Resolution | Start Year | Spatial Aggregation Method |
-|----------|-------------|------|---------------------|------------|----------------------------|
-| `ta` | Temperature | ℃ | 1-hour | 1997 | **Mean** of all grid cells within legal dong |
-| `rn_60m` | 60-min Precipitation | mm | 1-hour | 1997 | **Mean** of all grid cells within legal dong |
-| `sd_3hr` | 3-hour New Snowfall | cm | 3-hour | 2020 | **Mean** of all grid cells (Oct-May only) |
+| Variable | Description | Unit | Temporal Resolution | Start Year | Spatial Aggregation | Notes |
+|----------|-------------|------|---------------------|------------|---------------------|-------|
+| `ta` | Temperature | ℃ | 1-hour | 1997 | **Mean** of grid cells | Mean aggregation |
+| `rn_60m` | 60-min Precipitation | mm | 1-hour | 1997 | **Mean** of grid cells | Cumulative value |
+| `sd_3hr` | 3-hour New Snowfall | cm | 3-hour | 2020 | **Mean** of grid cells | Seasonal (Oct-May only) |
 
 **Spatial Aggregation Details:**
 
