@@ -263,11 +263,35 @@ All settings are in `fusion/config.py` (`FusionConfig` class):
 
 ### Available Variables
 
-| Variable | Description | Unit | Temporal Resolution | Start Year | Notes |
-|----------|-------------|------|---------------------|------------|-------|
-| `ta` | Temperature | ℃ | 1-hour | 1997 | Mean aggregation |
-| `rn_60m` | 60-min Precipitation | mm | 1-hour | 1997 | Cumulative value |
-| `sd_3hr` | 3-hour New Snowfall | cm | 3-hour | 2020 | Seasonal (Oct-May only) |
+| Variable | Description | Unit | Temporal Resolution | Start Year | Spatial Aggregation Method |
+|----------|-------------|------|---------------------|------------|----------------------------|
+| `ta` | Temperature | ℃ | 1-hour | 1997 | **Mean** of all grid cells within legal dong |
+| `rn_60m` | 60-min Precipitation | mm | 1-hour | 1997 | **Mean** of all grid cells within legal dong |
+| `sd_3hr` | 3-hour New Snowfall | cm | 3-hour | 2020 | **Mean** of all grid cells (Oct-May only) |
+
+**Spatial Aggregation Details:**
+
+When multiple grid cells fall within a single legal dong boundary, the pipeline aggregates them as follows:
+
+1. **Temperature (`ta`)**:
+   - Method: `mean()` - Average of all grid cell values in the legal dong
+   - NaN handling: Preserved (excluded from mean calculation)
+   - Example: If legal dong "청운효자동" contains 5 grid cells with temperatures [15.2, 15.5, NaN, 15.3, 15.4]℃, the result is (15.2+15.5+15.3+15.4)/4 = 15.35℃
+
+2. **Precipitation (`rn_60m`)**:
+   - Method: `mean()` - Average of all grid cell values in the legal dong
+   - NaN handling: Converted to 0 (assumption: no data = no precipitation)
+   - Example: If a legal dong contains 5 grid cells with precipitation [0.5, 1.2, NaN, 0.0, 0.3]mm, the result is (0.5+1.2+0+0.0+0.3)/5 = 0.4mm
+
+3. **Snowfall (`sd_3hr`)**:
+   - Method: `mean()` - Average of all grid cell values in the legal dong
+   - NaN handling: Converted to 0 (assumption: no data = no snowfall)
+   - Seasonal: Only produced October-May (automatically skipped for Jun-Sep)
+
+**Key Implementation Details:**
+- Grid cells not mapped to any legal dong (ocean, North Korea, boundaries) are excluded before aggregation
+- Each legal dong's final value = arithmetic mean of all grid cells within its polygon boundary
+- Missing data (`NaN`) handling differs by variable type to avoid bias in aggregation
 
 ### Output Column Format
 
