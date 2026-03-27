@@ -57,7 +57,6 @@ class FusionConfig:
 
     # API configuration
     api_base_url: str = "https://apihub-org.kma.go.kr/api/typ01"
-    max_query_minutes: int = 60  # Maximum API query period (minutes)
     api_sleep_seconds: float = 0.5  # API call interval
 
     # Download retry configuration

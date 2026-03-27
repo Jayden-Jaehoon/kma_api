@@ -1,7 +1,7 @@
 """
 시간/공간 집계 모듈
 
-- 시간 집계: 5분 → 1시간/3시간
+- 시간 집계: 시간별 데이터를 컬럼으로 피벗
 - 공간 집계: 격자 → 행정동
 """
 
@@ -17,100 +17,6 @@ class TimeAggregator:
     
     def __init__(self, config: Optional[FusionConfig] = None):
         self.config = config or DEFAULT_CONFIG
-    
-    def aggregate_5min_to_hourly(
-        self,
-        df: pd.DataFrame,
-        var_col: str,
-        time_col: str = 'datetime',
-        method: Literal['mean', 'sum', 'last', 'max', 'min'] = 'mean',
-        grid_col: str = 'grid_idx',
-    ) -> pd.DataFrame:
-        """
-        5분 데이터를 1시간 단위로 집계
-        
-        Args:
-            df: 입력 DataFrame (grid_idx, datetime, value)
-            var_col: 집계할 변수 컬럼명
-            time_col: 시간 컬럼명
-            method: 집계 방법 (mean, sum, last, max, min)
-            grid_col: 격자 인덱스 컬럼명
-            
-        Returns:
-            시간별 집계된 DataFrame
-        """
-        df = df.copy()
-        
-        # datetime 파싱
-        if not pd.api.types.is_datetime64_any_dtype(df[time_col]):
-            df[time_col] = pd.to_datetime(df[time_col])
-        
-        # 날짜와 시간 추출
-        df['date'] = df[time_col].dt.date
-        df['hour'] = df[time_col].dt.hour
-        
-        # 그룹별 집계
-        group_cols = [grid_col, 'date', 'hour']
-        
-        if method == 'mean':
-            result = df.groupby(group_cols)[var_col].mean().reset_index()
-        elif method == 'sum':
-            result = df.groupby(group_cols)[var_col].sum().reset_index()
-        elif method == 'last':
-            result = df.groupby(group_cols)[var_col].last().reset_index()
-        elif method == 'max':
-            result = df.groupby(group_cols)[var_col].max().reset_index()
-        elif method == 'min':
-            result = df.groupby(group_cols)[var_col].min().reset_index()
-        else:
-            raise ValueError(f"Unknown method: {method}")
-        
-        return result
-    
-    def aggregate_to_3hourly(
-        self,
-        df: pd.DataFrame,
-        var_col: str,
-        time_col: str = 'datetime',
-        method: Literal['mean', 'sum', 'last', 'max', 'min'] = 'last',
-        grid_col: str = 'grid_idx',
-    ) -> pd.DataFrame:
-        """
-        데이터를 3시간 단위로 집계 (적설용)
-        
-        Args:
-            df: 입력 DataFrame
-            var_col: 집계할 변수 컬럼명
-            time_col: 시간 컬럼명
-            method: 집계 방법
-            grid_col: 격자 인덱스 컬럼명
-            
-        Returns:
-            3시간별 집계된 DataFrame
-        """
-        df = df.copy()
-        
-        if not pd.api.types.is_datetime64_any_dtype(df[time_col]):
-            df[time_col] = pd.to_datetime(df[time_col])
-        
-        df['date'] = df[time_col].dt.date
-        df['hour'] = df[time_col].dt.hour
-        # 3시간 구간: 0-2→0, 3-5→3, 6-8→6, ...
-        df['hour_3h'] = (df['hour'] // 3) * 3
-        
-        group_cols = [grid_col, 'date', 'hour_3h']
-        
-        if method == 'mean':
-            result = df.groupby(group_cols)[var_col].mean().reset_index()
-        elif method == 'sum':
-            result = df.groupby(group_cols)[var_col].sum().reset_index()
-        elif method == 'last':
-            result = df.groupby(group_cols)[var_col].last().reset_index()
-        else:
-            raise ValueError(f"Unknown method: {method}")
-        
-        result = result.rename(columns={'hour_3h': 'hour'})
-        return result
     
     def pivot_hourly_to_columns(
         self,
@@ -220,11 +126,14 @@ class SpatialAggregator:
         # 매핑 실패 행 제거 (해양 등)
         df_with_id = df_with_id[df_with_id[self.id_col].notna()]
 
-        # 강수/적설 관련 컬럼은 NaN을 0으로 처리 (데이터가 없는 곳은 현상이 없는 것으로 간주)
-        # p: 강수량, s: 적설량
-        precip_snow_cols = [c for c in value_cols if c.startswith('p') or c.startswith('s')]
-        if precip_snow_cols:
-            df_with_id[precip_snow_cols] = df_with_id[precip_snow_cols].fillna(0)
+        # 강수/적설 관련 컬럼의 NaN 처리 정책:
+        # - sum 집계: NaN을 0으로 처리 (누적 합산 시 "관측 없음 = 0"으로 간주)
+        # - mean/median 집계: NaN 유지 (pandas groupby가 자동으로 NaN을 제외하고 평균 계산)
+        #   → fillna(0)을 하면 실제 관측이 없는 격자가 0으로 취급되어 평균이 낮아지는 문제 방지
+        if method == 'sum':
+            precip_snow_cols = [c for c in value_cols if c.startswith('p') or c.startswith('s')]
+            if precip_snow_cols:
+                df_with_id[precip_snow_cols] = df_with_id[precip_snow_cols].fillna(0)
         
         # 그룹 컬럼 결정
         group_cols = ['date', self.id_col]
