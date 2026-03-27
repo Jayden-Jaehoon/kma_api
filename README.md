@@ -88,22 +88,19 @@ python fusion_weather/run_process.py \
 
 ## 환경 설정
 
+루트의 `environment.yml` / `requirements.txt` 하나로 두 시스템(asos + fusion_weather)을 모두 실행할 수 있습니다.
+
 ### Conda
 
 ```bash
-# ASOS 시스템
-conda env create -f asos/environment.yml
-conda activate kma_asos
-
-# Fusion Weather 시스템
-conda env create -f fusion_weather/environment.yml
-conda activate kma_api
+conda env create -f environment.yml
+conda activate kma-api
 ```
 
 ### pip
 
 ```bash
-pip install -r fusion_weather/requirements.txt
+pip install -r requirements.txt
 ```
 
 ---

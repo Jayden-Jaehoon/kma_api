@@ -4,12 +4,14 @@ channels:
   - defaults
 dependencies:
   - python=3.9
+  # ── 공통 (asos + fusion_weather) ──
   - numpy<2
   - pandas=1.5.3
   - requests>=2.31
   - python-dotenv>=1.0
   - pip
   - pip:
+      # ── fusion_weather 전용 ──
       - geopandas>=0.14.0
       - shapely>=2.0.0
       - pyproj>=3.6.0
