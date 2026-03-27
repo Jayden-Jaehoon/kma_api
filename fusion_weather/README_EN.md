@@ -18,9 +18,7 @@ A data pipeline that downloads gridded weather data from the KMA (Korea Meteorol
 
 ```
 fusion_weather/
-├── .env                    # API authentication key (authKey)
-├── environment.yml         # Conda environment config
-├── requirements.txt        # pip dependencies
+├── ../.env                 # Unified API key (fusion_weather_authKey) [root]
 ├── run_download.py         # [Stage A] Raw download / cache creation
 ├── run_process.py          # [Stage B] Post-processing (pivot/spatial aggregation/output)
 ├── fusion/                 # Core package
@@ -57,12 +55,15 @@ pip install -r requirements.txt
 
 ### 2. Configure API Key
 
-Set the KMA API authentication key in `fusion_weather/.env`:
+API keys are managed centrally in the **project root** `.env` file:
 
-```
-authKey=YOUR_API_KEY_HERE
+```env
+# project_root/.env
+asos_authKey=YOUR_ASOS_KEY
+fusion_weather_authKey=YOUR_FUSION_KEY
 ```
 
+The Fusion Weather system uses `fusion_weather_authKey`.
 You can obtain an API key from [KMA API Hub](https://apihub.kma.go.kr/).
 
 ### 3. Download Administrative Dong Shapefile

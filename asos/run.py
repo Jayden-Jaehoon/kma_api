@@ -6,13 +6,14 @@ if __name__ == "__main__" :
 
     # 실행 파일이 위치한 폴더를 기준으로 설정
     BASE_DIR = Path(__file__).resolve().parent
+    ROOT_DIR = BASE_DIR.parent
     
-    # 해당 폴더 내의 .env 파일 로드
-    dotenv.load_dotenv(BASE_DIR / ".env")
-    auth_key = os.getenv("authKey")
+    # 루트 .env 파일 로드
+    dotenv.load_dotenv(ROOT_DIR / ".env")
+    auth_key = os.getenv("asos_authKey")
 
     if not auth_key:
-        raise ValueError("authKey를 asos/.env 파일에 설정해주세요")
+        raise ValueError("asos_authKey를 루트 .env 파일에 설정해주세요")
 
     # 데이터 루트 디렉토리 (asos/data 하위에 raw_data / post_process_data 자동 생성)
     BASE_DATA_DIR = str(BASE_DIR / "data")

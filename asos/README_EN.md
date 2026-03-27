@@ -35,13 +35,15 @@ pip install -r ../requirements.txt
 
 ## 2) .env Configuration (Important)
 
-An authentication key is required for KMA API calls. Create a `.env` file within the `asos` folder and enter it as follows. (Operates independently from the root `.env`.)
+An authentication key is required for KMA API calls. It is managed centrally in the **project root** `.env` file:
 
 ```env
-authKey=YOUR_API_KEY_HERE
+# project_root/.env
+asos_authKey=YOUR_API_KEY_HERE
+fusion_weather_authKey=YOUR_FUSION_KEY_HERE
 ```
 
-- The key name must be exactly `authKey`. It is read via `os.getenv("authKey")` in the code.
+- The ASOS system uses `asos_authKey`. It is read via `os.getenv("asos_authKey")` in the code.
 
 ---
 
@@ -53,7 +55,7 @@ asos/
 ├── process_data.py               # Download/Parsing/Pre-processing logic
 ├── get_station_info.py           # Station information download script
 ├── environment.yml               # Conda environment definition
-├── .env                          # Individual API key configuration
+├── ../.env                       # Unified API key configuration (root)
 └── data/
     ├── raw_data/                 # Original text storage (Auto-generated)
     ├── post_process_data/        # Pre-processed CSV storage (Auto-generated)
@@ -118,5 +120,5 @@ python get_station_info.py
   - Use the provided `requirements.txt` or `environment.yml` to ensure compatible versions.
   - Manually: `pip install "numpy<2" "pandas==1.5.3"`.
 
-- **Missing .env or authKey?**
-  - Ensure the `.env` file exists **inside the `asos` folder** with the correct `authKey=...` entry.
+- **Missing .env or asos_authKey?**
+  - Ensure the `.env` file exists in the **project root** with the correct `asos_authKey=...` entry.

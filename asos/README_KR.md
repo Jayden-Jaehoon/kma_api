@@ -33,13 +33,15 @@ pip install -r ../requirements.txt
 
 ## 2) .env 파일 설정(중요)
 
-KMA API 호출에는 인증키가 필요합니다. `asos` 폴더 내에 `.env` 파일을 만들고 아래처럼 입력하세요. (루트의 .env와는 별개로 동작합니다.)
+KMA API 호출에는 인증키가 필요합니다. **프로젝트 루트**의 `.env` 파일에서 통합 관리합니다:
 
 ```env
-authKey=발급받은_인증키를_여기에
+# 프로젝트 루트/.env
+asos_authKey=발급받은_인증키를_여기에
+fusion_weather_authKey=융합기상용_인증키
 ```
 
-- 키 이름은 정확히 `authKey`여야 합니다. 코드에서 `os.getenv("authKey")`로 읽습니다.
+- ASOS 시스템은 `asos_authKey`를 사용합니다. 코드에서 `os.getenv("asos_authKey")`로 읽습니다.
 
 
 ## 3) 프로젝트 구조
@@ -49,8 +51,7 @@ asos/
 ├── run.py                        # 실행 진입점 (연도 범위 일자료 다운로드+전처리)
 ├── process_data.py               # 다운로드/파싱/전처리 로직
 ├── get_station_info.py           # 관측소(지점) 원본 정보 다운로드 스크립트
-├── environment.yml               # conda 환경 정의
-├── .env                          # 개별 인증키 설정 파일
+├── ../.env                       # 통합 인증키 설정 (루트)
 └── data/
     ├── raw_data/                 # 원본 텍스트 저장 위치(자동 생성)
     ├── post_process_data/        # 전처리된 CSV 저장 위치(자동 생성)
@@ -62,7 +63,7 @@ asos/
 
 ## 4) 실행 방법(run.py)
 
-`asos` 폴더 내의 `.env`가 준비되었다면 다음 한 줄로 예제를 실행할 수 있습니다.
+루트 `.env`에 `asos_authKey`가 설정되었다면 다음 한 줄로 예제를 실행할 수 있습니다.
 
 ```bash
 cd asos
@@ -106,7 +107,7 @@ python get_station_info.py
 ```
 
 기본 동작:
-- `.env`의 `authKey`를 읽습니다.
+- 루트 `.env`의 `asos_authKey`를 읽습니다.
 - `data/` 폴더에 `station_info_SFC_YYYYMMDD.txt` 형식의 파일을 저장합니다.
 
 ### 코드에서 사용
@@ -126,7 +127,7 @@ download_station_info(inf_type="SFC", auth_key=auth_key, save_dir="../data")
 - `tm1`, `tm2`: 조회 시작/종료일(예: `YYYYMMDD`) — 본 프로젝트에서는 연 단위로 자동 세팅합니다.
 - `stn`: 지점번호. `"0"`이면 전체 지점, 특정 지점만 원하면 숫자 또는 콜론 구분자 사용(예: `"108"`, `"108:159"`).
 - `help`: `1`이면 원본 끝에 도움말 섹션 포함(본 파이프라인은 도움말을 제거한 후 파싱합니다).
-- `authKey`: 필수. `.env`에 저장합니다.
+- `authKey`: 필수. 루트 `.env`에 `asos_authKey`로 저장합니다.
 
 
 ## 8) 자주 묻는 질문(FAQ) / 트러블슈팅
@@ -135,8 +136,8 @@ download_station_info(inf_type="SFC", auth_key=auth_key, save_dir="../data")
   - 의존성 버전을 고정하세요. 본 프로젝트의 `requirements.txt` 또는 `environment.yml`을 그대로 사용하면 해결됩니다.
   - 이미 만든 환경에서 해결하려면: `pip install "numpy<2" "pandas==1.5.3"`.
 
-- `.env`가 없거나 `authKey`가 비어 있대요.
-  - 프로젝트 루트에 `.env` 파일을 만들고 `authKey=...`를 채우세요. 키 이름은 대소문자 포함 동일해야 합니다.
+- `.env`가 없거나 `asos_authKey`가 비어 있대요.
+  - 프로젝트 루트에 `.env` 파일을 만들고 `asos_authKey=...`를 채우세요.
 
 - 출력 CSV에 `LAW_ID`가 비어있는 행이 있어요.
   - `STN`에 해당하는 매핑이 `data/station_info_structured.csv`에 없는 경우입니다. 해당 파일을 갱신하거나 필요한 지점을 추가하세요.

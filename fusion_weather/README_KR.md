@@ -18,9 +18,7 @@
 
 ```
 fusion_weather/
-├── .env                    # API 인증키 (authKey)
-├── environment.yml         # Conda 환경 설정
-├── requirements.txt        # pip 의존성
+├── ../.env                 # 통합 인증키 (fusion_weather_authKey) [루트]
 ├── run_download.py         # [A 단계] raw 다운로드/캐시 생성
 ├── run_process.py          # [B 단계] 후처리 (피벗/공간집계/출력)
 ├── fusion/                 # 핵심 패키지
@@ -57,12 +55,15 @@ pip install -r requirements.txt
 
 ### 2. API 인증키 설정
 
-`fusion_weather/.env` 파일에 기상청 API 인증키를 설정합니다:
+**프로젝트 루트**의 `.env` 파일에서 통합 관리합니다:
 
-```
-authKey=YOUR_API_KEY_HERE
+```env
+# 프로젝트 루트/.env
+asos_authKey=YOUR_ASOS_KEY
+fusion_weather_authKey=YOUR_FUSION_KEY
 ```
 
+융합기상 시스템은 `fusion_weather_authKey`를 사용합니다.
 인증키는 [기상청 API허브](https://apihub.kma.go.kr/)에서 발급받을 수 있습니다.
 
 ### 3. 행정동 Shapefile 다운로드

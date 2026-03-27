@@ -103,11 +103,12 @@ def _download_one_day_worker(
 def main(argv: List[str] | None = None):
     args = _build_arg_parser().parse_args(argv)
 
-    # fusion_weather/.env 우선 로드
-    dotenv.load_dotenv(os.path.join(BASE_DIR, ".env"))
-    auth_key = os.getenv("authKey")
+    # 루트 .env 파일 로드
+    ROOT_DIR = os.path.dirname(BASE_DIR)
+    dotenv.load_dotenv(os.path.join(ROOT_DIR, ".env"))
+    auth_key = os.getenv("fusion_weather_authKey")
     if not auth_key:
-        raise SystemExit("오류: fusion_weather/.env에 authKey를 설정해주세요")
+        raise SystemExit("오류: 루트 .env에 fusion_weather_authKey를 설정해주세요")
 
     variables = [v.strip() for v in args.variables.split(",") if v.strip()]
     if not variables:
