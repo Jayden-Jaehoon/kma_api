@@ -46,7 +46,7 @@ def download_station_info(inf_type="SFC", auth_key=None, save_dir=None):
     with open(save_path, 'w', encoding='utf-8') as f:
         f.write(response.text)
 
-    print(f"✓ 파일 저장 완료: {save_path}")
+    print(f"[OK] 파일 저장 완료: {save_path}")
     print(f"  파일 크기: {os.path.getsize(save_path):,} bytes")
 
     # 처음 몇 줄만 미리보기
@@ -87,7 +87,7 @@ def download_all_station_info(save_dir=None, auth_key=None):
             saved_files.append(file_path)
 
         except Exception as e:
-            print(f"✗ 오류 발생: {e}")
+            print(f"[ERROR] 오류 발생: {e}")
 
     return saved_files
 
@@ -126,10 +126,10 @@ if __name__ == "__main__":
         print("=" * 80)
         print(f"총 {len(saved_files)}개 파일 저장:")
         for file in saved_files:
-            print(f"  ✓ {os.path.basename(file)}")
+            print(f"  [OK] {os.path.basename(file)}")
 
     except Exception as e:
-        print(f"\n✗ 오류 발생: {e}")
+        print(f"\n[ERROR] 오류 발생: {e}")
         import traceback
 
         traceback.print_exc()
