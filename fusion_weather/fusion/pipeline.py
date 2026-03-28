@@ -1,7 +1,7 @@
 """
-융합기상정보 전체 처리 파이프라인 (행정동 기반)
+융합기상정보 전체 처리 파이프라인
 
-다운로드 → 파싱 → 시간 집계 → 공간 집계(행정동) → 출력
+다운로드 → 파싱 → 시간 집계 → 공간 집계(행정동/법정동) → 출력
 """
 
 import os
@@ -14,9 +14,15 @@ import pandas as pd
 from tqdm import tqdm
 
 from .config import FusionConfig, DEFAULT_CONFIG
-from .geocode import GridToHjdMapper
+from .geocode import GridToHjdMapper, GridToBjdMapper
 from .download import FusionDataDownloader
 from .aggregate import TimeAggregator, SpatialAggregator, OutputFormatter
+
+# region_type → (매퍼 클래스, 코드 컬럼, 명칭 컬럼)
+_REGION_REGISTRY = {
+    'hjd': (GridToHjdMapper, 'HJD_CD', 'HJD_NM'),
+    'bjd': (GridToBjdMapper, 'EMD_CD', 'EMD_NM'),
+}
 
 
 class FusionPipeline:
@@ -33,13 +39,11 @@ class FusionPipeline:
         
         # 컴포넌트 초기화
         self.downloader = FusionDataDownloader(auth_key, self.config)
-        self.mapper = GridToHjdMapper(self.config)
         self.time_agg = TimeAggregator(self.config)
         self.formatter = OutputFormatter(self.config)
-        
-        # 매핑 테이블
-        self._grid_mapping: Optional[pd.DataFrame] = None
-        self._spatial_agg: Optional[SpatialAggregator] = None
+
+        # region_type별 매핑/집계 캐시: {'hjd': (mapping_df, SpatialAggregator), ...}
+        self._region_cache: Dict[str, tuple] = {}
 
         # 다운로드/파싱 단계에서만 필요할 때 사용할 “기대 격자 수” 캐시.
         # - 후처리(공간집계)에서는 매핑 테이블이 필요하지만,
@@ -47,11 +51,23 @@ class FusionPipeline:
         #   NetCDF 차원(ny*nx)에서 기대 격자 수를 빠르게 계산해 Strict 검증에 사용합니다.
         self._expected_grid_n: Optional[int] = None
     
-    def ensure_mapping(self, force_rebuild: bool = False):
-        """격자-행정동 매핑 테이블 확보"""
-        if self._grid_mapping is None or force_rebuild:
-            self._grid_mapping = self.mapper.build_hjd_mapping(force_rebuild=force_rebuild)
-            self._spatial_agg = SpatialAggregator(self._grid_mapping, self.config)
+    def ensure_mapping(self, region_type: str = 'hjd', force_rebuild: bool = False):
+        """격자-지역 매핑 테이블 확보 (hjd 또는 bjd)"""
+        if region_type not in _REGION_REGISTRY:
+            raise ValueError(f"지원하지 않는 region_type: {region_type}. 가능: {list(_REGION_REGISTRY)}")
+
+        if region_type not in self._region_cache or force_rebuild:
+            mapper_cls, _, _ = _REGION_REGISTRY[region_type]
+            mapper = mapper_cls(self.config)
+            mapping_df = mapper.build_mapping(force_rebuild=force_rebuild)
+            spatial_agg = SpatialAggregator(mapping_df, self.config)
+            self._region_cache[region_type] = (mapping_df, spatial_agg)
+
+    def _get_region(self, region_type: str):
+        """캐시된 (mapping_df, spatial_agg) 반환."""
+        if region_type not in self._region_cache:
+            self.ensure_mapping(region_type)
+        return self._region_cache[region_type]
 
     def _get_expected_grid_n(self) -> Optional[int]:
         """격자 API 응답의 기대 값 개수(N)를 반환.
@@ -139,20 +155,22 @@ class FusionPipeline:
         date: str,
         variables: List[str] = None,
         save_interim: bool = True,
+        region_type: str = 'hjd',
     ) -> pd.DataFrame:
         """캐시된 raw parquet만 사용해 하루치 후처리를 수행(B 단계용).
 
         주의:
         - 이 함수는 다운로드를 수행하지 않습니다.
         - `data/fusion_raw/YYYY/MM/{var}_{date}_parsed.parquet`가 없으면 해당 변수를 스킵합니다.
+
+        Args:
+            region_type: 'hjd' (행정동) 또는 'bjd' (법정동)
         """
         if variables is None:
             variables = ["ta", "rn_60m"]
 
-        # 테스트/특수 실행에서는 이미 _grid_mapping/_spatial_agg를 주입할 수 있어,
-        # 존재하지 않으면 그때만 매핑을 로드합니다.
-        if self._grid_mapping is None or self._spatial_agg is None:
-            self.ensure_mapping()
+        self.ensure_mapping(region_type)
+        mapping_df, spatial_agg = self._get_region(region_type)
 
         year = date[:4]
         month = date[4:6]
@@ -184,7 +202,6 @@ class FusionPipeline:
             if df_raw is None or len(df_raw) == 0:
                 continue
 
-            # 시간 집계: 현재 raw가 이미 정각/3시간 정각 단위이므로 그대로 사용
             df_hourly = df_raw
 
             # 피벗 (시간 → 컬럼)
@@ -195,24 +212,27 @@ class FusionPipeline:
                 is_3hourly=is_3hourly,
             )
 
-            # 공간 집계 (격자 → 행정동)
+            # 공간 집계 (격자 → 지역)
             value_cols = [c for c in df_pivot.columns if c.startswith(col_prefix)]
-            df_hjd = self._spatial_agg.aggregate_grid_to_region(
+            df_agg = spatial_agg.aggregate_grid_to_region(
                 df_pivot,
                 value_cols=value_cols,
                 method="mean",
             )
-            results[var] = df_hjd
+            results[var] = df_agg
 
         if not results:
             return pd.DataFrame()
 
+        # index_cols를 region_type에 맞게 전달
+        _, _, _ = _REGION_REGISTRY[region_type]
         final_df = self.formatter.merge_variables(results)
 
         if save_interim:
             interim_dir = os.path.join(self.config.fusion_interim_dir, year)
             os.makedirs(interim_dir, exist_ok=True)
-            interim_path = os.path.join(interim_dir, f"fusion_{date}.parquet")
+            suffix = f"_{region_type}" if region_type != 'hjd' else ""
+            interim_path = os.path.join(interim_dir, f"fusion_{date}{suffix}.parquet")
             final_df.to_parquet(interim_path, index=False)
 
         return final_df
@@ -290,99 +310,87 @@ class FusionPipeline:
         date: str,
         variables: List[str] = None,
         save_interim: bool = True,
+        region_type: str = 'hjd',
     ) -> pd.DataFrame:
         """
-        하루 데이터 처리
-        
+        하루 데이터 처리 (다운로드 + 후처리)
+
         Args:
             date: 날짜 (YYYYMMDD)
             variables: 변수 목록 (기본: ['ta', 'rn_60m'])
             save_interim: 중간 결과 저장 여부
-            
-        Returns:
-            행정동별 일별 집계 DataFrame
+            region_type: 'hjd' (행정동) 또는 'bjd' (법정동)
         """
         if variables is None:
             variables = ['ta', 'rn_60m']
-        
-        self.ensure_mapping()
-        
+
+        self.ensure_mapping(region_type)
+        _, spatial_agg = self._get_region(region_type)
+
         year = date[:4]
         month = date[4:6]
-        
+
         # 적설 데이터 가능 여부 확인
         if 'sd_3hr' in variables:
             int_year = int(year)
             int_month = int(month)
-            
-            # 2020년 이전이면 적설 제외
+
             if int_year < self.config.snow_start_year:
                 variables = [v for v in variables if v != 'sd_3hr']
                 print(f"  적설 데이터는 {self.config.snow_start_year}년부터 제공됩니다.")
-            
-            # 여름철 (6~9월)이면 적설 제외
+
             if int_month in [6, 7, 8, 9]:
                 variables = [v for v in variables if v != 'sd_3hr']
                 print(f"  여름철({int_month}월)에는 적설 데이터가 생산되지 않습니다.")
-        
+
         results = {}
-        
+
         for var in variables:
             var_info = self.config.variables.get(var, {})
             col_prefix = var_info.get('col_prefix', var[0])
-            agg_method = var_info.get('hourly_agg', 'mean')
             is_3hourly = var_info.get('hours', 24) == 8
-            
+
             print(f"  [{var}] 처리 중...")
-            
-            # 1. 다운로드 (또는 캐시 로드)
+
             raw_dir = os.path.join(self.config.fusion_raw_dir, year, month)
             df_raw = self._load_or_download_day(date, var, raw_dir)
-            
+
             if df_raw is None or len(df_raw) == 0:
                 print(f"    데이터 없음, 건너뜀")
                 continue
-            
-            # 2. 시간 집계 (이미 1시간 단위라면 스킵)
-            if is_3hourly:
-                # 3시간 적설은 그대로 사용
-                df_hourly = df_raw
-            else:
-                # 기온/강수는 이미 1시간 단위로 다운로드됨
-                df_hourly = df_raw
-            
-            # 3. 피벗 (시간 → 컬럼)
+
+            df_hourly = df_raw
+
             df_pivot = self.time_agg.pivot_hourly_to_columns(
                 df_hourly,
                 var_col='value',
                 col_prefix=col_prefix,
                 is_3hourly=is_3hourly,
             )
-            
-            # 4. 공간 집계 (격자 → 행정동)
+
             value_cols = [c for c in df_pivot.columns if c.startswith(col_prefix)]
-            df_hjd = self._spatial_agg.aggregate_grid_to_region(
+            df_agg = spatial_agg.aggregate_grid_to_region(
                 df_pivot,
                 value_cols=value_cols,
                 method='mean',
             )
             
-            results[var] = df_hjd
-            print(f"    완료: {len(df_hjd)} 행정동")
-        
+            results[var] = df_agg
+            print(f"    완료: {len(df_agg)} 지역")
+
         # 5. 변수 병합
         if results:
             final_df = self.formatter.merge_variables(results)
-            
-            # 중간 저장
+
             if save_interim:
                 interim_dir = os.path.join(self.config.fusion_interim_dir, year)
                 os.makedirs(interim_dir, exist_ok=True)
-                interim_path = os.path.join(interim_dir, f"fusion_{date}.parquet")
+                suffix = f"_{region_type}" if region_type != 'hjd' else ""
+                interim_path = os.path.join(interim_dir, f"fusion_{date}{suffix}.parquet")
                 final_df.to_parquet(interim_path, index=False)
-            
+
             return final_df
-        
+
         return pd.DataFrame()
     
     def process_month(
@@ -390,6 +398,7 @@ class FusionPipeline:
         year: int,
         month: int,
         variables: List[str] = None,
+        region_type: str = 'hjd',
     ) -> pd.DataFrame:
         """
         한 달 데이터 처리
@@ -423,7 +432,7 @@ class FusionPipeline:
         for day in tqdm(range(1, num_days + 1), desc=f"{year}-{month:02d}"):
             date = f"{year}{month:02d}{day:02d}"
             try:
-                df = self.process_day(date, variables, save_interim=True)
+                df = self.process_day(date, variables, save_interim=True, region_type=region_type)
                 if len(df) > 0:
                     monthly_dfs.append(df)
             except Exception as e:
@@ -450,6 +459,7 @@ class FusionPipeline:
         variables: List[str] = None,
         start_month: int = 1,
         end_month: int = 12,
+        region_type: str = 'hjd',
     ) -> str:
         """
         연도별 데이터 처리
@@ -477,7 +487,7 @@ class FusionPipeline:
         
         for month in range(start_month, end_month + 1):
             try:
-                df = self.process_month(year, month, variables)
+                df = self.process_month(year, month, variables, region_type=region_type)
                 if len(df) > 0:
                     yearly_dfs.append(df)
             except Exception as e:
@@ -845,17 +855,13 @@ if __name__ == "__main__":
     import dotenv
     dotenv.load_dotenv()
     
-    auth_key = os.getenv("authKey")
+    auth_key = os.getenv("fusion_weather_authKey")
     if not auth_key:
-        raise ValueError("authKey를 .env 파일에 설정해주세요")
-    
-    # 테스트: 하루 데이터 처리
+        raise ValueError("fusion_weather_authKey를 .env 파일에 설정해주세요")
+
     pipeline = FusionPipeline(auth_key)
-    
-    # 매핑 테이블 생성
-    pipeline.ensure_mapping()
-    
-    # 하루 처리 테스트
-    result = pipeline.process_day("20240101", variables=['ta'])
-    print(f"\n결과 샘플:")
+
+    # 행정동 테스트
+    result = pipeline.process_day("20240101", variables=['ta'], region_type='hjd')
+    print(f"\n행정동 결과 샘플:")
     print(result.head())

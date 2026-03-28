@@ -91,11 +91,15 @@ class SpatialAggregator:
         self.grid_mapping = grid_mapping
         self.config = config or DEFAULT_CONFIG
         
-        # 매핑 테이블에서 행정동 코드 컬럼 결정
+        # 매핑 테이블에서 지역 코드 컬럼 자동 감지 (HJD 또는 BJD)
         if 'HJD_CD' in grid_mapping.columns:
             self.id_col = 'HJD_CD'
+            self.nm_col = 'HJD_NM'
+        elif 'EMD_CD' in grid_mapping.columns:
+            self.id_col = 'EMD_CD'
+            self.nm_col = 'EMD_NM'
         else:
-            raise ValueError("매핑 테이블에서 행정동 코드 컬럼(HJD_CD)을 찾을 수 없습니다.")
+            raise ValueError("매핑 테이블에서 지역 코드 컬럼(HJD_CD 또는 EMD_CD)을 찾을 수 없습니다.")
     
     def aggregate_grid_to_region(
         self,
@@ -176,7 +180,7 @@ class OutputFormatter:
     def merge_variables(
         self,
         dfs: Dict[str, pd.DataFrame],
-        index_cols: List[str] = ['date', 'HJD_CD'],
+        index_cols: Optional[List[str]] = None,
     ) -> pd.DataFrame:
         """
         여러 변수의 DataFrame을 하나로 병합
@@ -190,7 +194,17 @@ class OutputFormatter:
         """
         if not dfs:
             return pd.DataFrame()
-        
+
+        # index_cols 자동 감지: date + 지역코드 컬럼
+        if index_cols is None:
+            first_df = next(iter(dfs.values()))
+            for col in ['HJD_CD', 'EMD_CD']:
+                if col in first_df.columns:
+                    index_cols = ['date', col]
+                    break
+            if index_cols is None:
+                index_cols = ['date']
+
         # 첫 번째 df를 기준으로 병합
         result = None
         for var_name, df in dfs.items():
@@ -220,14 +234,16 @@ class OutputFormatter:
         
         return result[sorted_cols]
     
-    def add_hjd_name(
+    def add_region_name(
         self,
         df: pd.DataFrame,
         grid_mapping: pd.DataFrame,
+        id_col: str,
+        nm_col: str,
     ) -> pd.DataFrame:
-        """행정동명 컨럼 추가"""
-        hjd_names = grid_mapping[['HJD_CD', 'HJD_NM']].drop_duplicates()
-        return df.merge(hjd_names, on='HJD_CD', how='left')
+        """지역명 컬럼 추가 (행정동/법정동 공용)"""
+        names = grid_mapping[[id_col, nm_col]].drop_duplicates()
+        return df.merge(names, on=id_col, how='left')
     
     def format_date_column(
         self,

@@ -55,6 +55,16 @@ class FusionConfig:
         """Grid-to-administrative-dong mapping file path"""
         return os.path.join(self.geodata_dir, "grid_to_hjd.parquet")
 
+    @property
+    def geodata_umd_dir(self) -> str:
+        """Legal dong (BJD/UMD) shapefile directory"""
+        return os.path.join(self.data_dir, "geodata_umd")
+
+    @property
+    def grid_bjd_mapping_file(self) -> str:
+        """Grid-to-legal-dong mapping file path"""
+        return os.path.join(self.geodata_dir, "grid_to_emd_umd.parquet")
+
     # API configuration
     # 기관용(org): 대용량 처리용 별도 도메인, 일반(public): 개인 API키용
     API_BASE_URLS = {
@@ -110,6 +120,7 @@ class FusionConfig:
         """Create necessary directories"""
         for dir_path in [
             self.geodata_hjd_dir,
+            self.geodata_umd_dir,
             self.fusion_raw_dir,
             self.fusion_interim_dir,
             self.fusion_output_dir,
