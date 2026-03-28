@@ -193,12 +193,8 @@ class OutputFormatter:
         # index_cols 자동 감지: date + 지역코드 컬럼
         if index_cols is None:
             first_df = next(iter(dfs.values()))
-            for col in ['HJD_CD', 'EMD_CD']:
-                if col in first_df.columns:
-                    index_cols = ['date', col]
-                    break
-            if index_cols is None:
-                index_cols = ['date']
+            id_cols = [col for col in ['HJD_CD', 'EMD_CD'] if col in first_df.columns]
+            index_cols = ['date'] + id_cols if id_cols else ['date']
 
         # 첫 번째 df를 기준으로 병합
         result = None
@@ -208,24 +204,28 @@ class OutputFormatter:
             else:
                 result = result.merge(df, on=index_cols, how='outer')
         
-        # 컬럼 순서 정렬: index_cols + t* + p* + s*
-        sorted_cols = list(index_cols)
-        
+        # 컬럼 순서 정렬: date + t* + p* + s* + 지역코드(HJD_CD, EMD_CD 등)
+        id_cols = [c for c in index_cols if c != 'date']
+        sorted_cols = ['date'] if 'date' in index_cols else []
+
         # 기온 (t)
         t_cols = sorted([c for c in result.columns if c.startswith('t') and c not in index_cols])
         sorted_cols.extend(t_cols)
-        
+
         # 강수량 (p)
         p_cols = sorted([c for c in result.columns if c.startswith('p') and c not in index_cols])
         sorted_cols.extend(p_cols)
-        
+
         # 적설량 (s)
         s_cols = sorted([c for c in result.columns if c.startswith('s') and c not in index_cols])
         sorted_cols.extend(s_cols)
-        
+
         # 나머지 컬럼
-        other_cols = [c for c in result.columns if c not in sorted_cols]
+        other_cols = [c for c in result.columns if c not in sorted_cols and c not in id_cols]
         sorted_cols.extend(other_cols)
+
+        # 지역코드 맨 뒤
+        sorted_cols.extend(id_cols)
         
         return result[sorted_cols]
     
