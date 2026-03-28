@@ -5,7 +5,11 @@
 ## 개요
 
 - **데이터 소스**: [기상청 API허브](https://apihub.kma.go.kr/) - 융합기상 탭
-- **API 엔드포인트**: `https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-sfc_obs_nc_api`
+- **API 엔드포인트**:
+  | 유형 | 도메인 | 용도 |
+  |------|--------|------|
+  | `org` (기본) | `apihub-org.kma.go.kr` | 기관용 대용량 처리 |
+  | `public` | `apihub.kma.go.kr` | 일반 개인 API키 |
 - **공간 집계 기준**: 행정동 경계 (2022년 4분기 Shapefile 기준)
 - **지원 변수**:
   | 변수 키 | 설명 | 단위 | 시간 간격 |
@@ -102,6 +106,9 @@ python fusion_weather/run_download.py --test-day 20241128 --variables ta,rn_60m,
 
 # 별도 경로에 저장
 python fusion_weather/run_download.py --output-path E:\kma --start-year 2024 --end-year 2024
+
+# 일반(public) API키로 다운로드
+python fusion_weather/run_download.py --api-type public --test-day 20241128 --variables ta
 ```
 
 ### B 단계: 후처리 (행정동 집계)

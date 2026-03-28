@@ -56,8 +56,17 @@ class FusionConfig:
         return os.path.join(self.geodata_dir, "grid_to_hjd.parquet")
 
     # API configuration
-    api_base_url: str = "https://apihub-org.kma.go.kr/api/typ01"
+    # 기관용(org): 대용량 처리용 별도 도메인, 일반(public): 개인 API키용
+    API_BASE_URLS = {
+        "org": "https://apihub-org.kma.go.kr/api/typ01",
+        "public": "https://apihub.kma.go.kr/api/typ01",
+    }
+    api_type: str = "org"  # "org" (기관용) or "public" (일반)
     api_sleep_seconds: float = 0.5  # API call interval
+
+    @property
+    def api_base_url(self) -> str:
+        return self.API_BASE_URLS.get(self.api_type, self.API_BASE_URLS["org"])
 
     # Download retry configuration
     # - Handles temporary network failures (ChunkedEncodingError, etc.) and intermittent API errors

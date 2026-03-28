@@ -41,6 +41,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--test-day", type=str, default=None, help="테스트용 하루(YYYYMMDD)만 다운로드")
     p.add_argument("--max-workers", type=int, default=4, help="날짜 단위 병렬 worker 수 (기본 4)")
     p.add_argument("--output-path", type=str, default=None, help="데이터 저장 경로 (기본값: project_root/data)")
+    p.add_argument("--api-type", type=str, default="org", choices=["org", "public"],
+                    help="API 유형: org=기관용(대용량), public=일반 (기본: org)")
     return p
 
 
@@ -86,12 +88,13 @@ def _download_one_day_worker(
     date: str,
     variables: List[str],
     output_path: str | None = None,
+    api_type: str = "org",
 ) -> _DayResult:
     # 워커 프로세스에서 import/초기화
     from fusion.config import FusionConfig
     from fusion.pipeline import FusionPipeline
 
-    config = FusionConfig(project_root=project_root, custom_data_root=output_path)
+    config = FusionConfig(project_root=project_root, custom_data_root=output_path, api_type=api_type)
     pipeline = FusionPipeline(auth_key=auth_key, config=config)
 
     summary = pipeline.ensure_day_cache(date=date, variables=variables)
@@ -101,6 +104,8 @@ def _download_one_day_worker(
 
 
 def main(argv: List[str] | None = None):
+    from fusion.config import FusionConfig
+
     args = _build_arg_parser().parse_args(argv)
 
     # 루트 .env 파일 로드
@@ -130,6 +135,7 @@ def main(argv: List[str] | None = None):
     print("[A] raw 다운로드/캐시 생성")
     print("=" * 70)
     print("project_root:", project_root)
+    print("api_type:", args.api_type, f"({FusionConfig.API_BASE_URLS[args.api_type]})")
     if args.output_path:
         print("output_path:", args.output_path)
     print("dates:", len(dates), "(first/last:", dates[0], "~", dates[-1], ")")
@@ -152,6 +158,7 @@ def main(argv: List[str] | None = None):
                 date=date,
                 variables=variables,
                 output_path=args.output_path,
+                api_type=args.api_type,
             )
             for date in dates
         ]
@@ -222,7 +229,7 @@ if __name__ == "__main__":
         ide_argv = [
             "--start-year", "2018",
             "--end-year", "2019",
-            "--start-month", "2",
+            "--start-month", "10",
             "--end-month", "12",
             "--variables", "ta,rn_60m,sd_3hr",
             "--max-workers", "3",

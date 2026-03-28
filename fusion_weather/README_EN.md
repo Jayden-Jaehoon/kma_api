@@ -5,7 +5,11 @@ A data pipeline that downloads gridded weather data from the KMA (Korea Meteorol
 ## Overview
 
 - **Data Source**: [KMA API Hub](https://apihub.kma.go.kr/) - Fusion Weather tab
-- **API Endpoint**: `https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-sfc_obs_nc_api`
+- **API Endpoint**:
+  | Type | Domain | Purpose |
+  |------|--------|---------|
+  | `org` (default) | `apihub-org.kma.go.kr` | Institutional / bulk downloads |
+  | `public` | `apihub.kma.go.kr` | Personal API key |
 - **Spatial Aggregation**: Administrative dong boundaries (2022 Q4 Shapefile)
 - **Supported Variables**:
   | Key | Description | Unit | Interval |
@@ -102,6 +106,9 @@ python fusion_weather/run_download.py --test-day 20241128 --variables ta,rn_60m,
 
 # Save to custom path
 python fusion_weather/run_download.py --output-path E:\kma --start-year 2024 --end-year 2024
+
+# Use public (personal) API key endpoint
+python fusion_weather/run_download.py --api-type public --test-day 20241128 --variables ta
 ```
 
 ### Stage B: Post-Processing (Administrative Dong Aggregation)
@@ -115,6 +122,9 @@ python fusion_weather/run_process.py \
 
 # Force rebuild administrative dong mapping
 python fusion_weather/run_process.py --force-rebuild-mapping --test-day 20241128
+
+# Process from custom path (must match Stage A --output-path)
+python fusion_weather/run_process.py --output-path E:\kma --start-year 2024 --end-year 2024
 ```
 
 ## Processing Pipeline

@@ -42,6 +42,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--variables", type=str, default="ta,rn_60m")
     p.add_argument("--test-day", type=str, default=None, help="테스트용 하루(YYYYMMDD)만 후처리")
     p.add_argument("--force-rebuild-mapping", action="store_true", help="행정동 매핑 테이블 강제 재생성")
+    p.add_argument("--output-path", type=str, default=None, help="데이터 경로 (A단계의 --output-path와 동일하게 지정)")
     return p
 
 
@@ -59,12 +60,10 @@ def _iter_dates_for_month(year: int, month: int) -> List[str]:
 def main(argv: List[str] | None = None):
     args = _build_arg_parser().parse_args(argv)
 
-    # 루트 .env 파일 로드
+    # 루트 .env 파일 로드 (B단계는 다운로드하지 않으므로 auth_key는 선택사항)
     ROOT_DIR = os.path.dirname(BASE_DIR)
     dotenv.load_dotenv(os.path.join(ROOT_DIR, ".env"))
-    auth_key = os.getenv("fusion_weather_authKey")
-    if not auth_key:
-        raise SystemExit("오류: 루트 .env에 fusion_weather_authKey를 설정해주세요")
+    auth_key = os.getenv("fusion_weather_authKey", "")
 
     variables = [v.strip() for v in args.variables.split(",") if v.strip()]
     if not variables:
@@ -78,13 +77,15 @@ def main(argv: List[str] | None = None):
     from fusion.pipeline import FusionPipeline
     from fusion.aggregate import SpatialAggregator
 
-    config = FusionConfig(project_root=project_root)
+    config = FusionConfig(project_root=project_root, custom_data_root=args.output_path)
 
     # 행정동 매핑 테이블 생성/로드
     print("=" * 70)
     print("[B] 행정동 기반 후처리")
     print("=" * 70)
     print("project_root:", project_root)
+    if args.output_path:
+        print("output_path:", args.output_path)
     print("행정동 매핑 파일:", config.grid_hjd_mapping_file)
     print()
 
