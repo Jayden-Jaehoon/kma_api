@@ -31,7 +31,7 @@ if __name__ == "__main__" :
         )
 
         print("\n" + "=" * 80)
-        print("✓ 연단위 다운로드 및 전처리 완료!")
+        print("[OK] 연단위 다운로드 및 전처리 완료!")
         print("결과 요약:")
         for r in results:
             print(f"  - RAW : {r['raw']}")
@@ -39,7 +39,7 @@ if __name__ == "__main__" :
         print("=" * 80)
 
     except Exception as e:
-        print(f"\n✗ 오류 발생: {e}")
+        print(f"\n[ERROR] 오류 발생: {e}")
         import traceback
 
         traceback.print_exc()

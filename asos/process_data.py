@@ -1,4 +1,7 @@
 import os
+import time
+import logging
+from datetime import datetime
 from itertools import dropwhile
 from typing import Iterable, List, Optional
 
@@ -108,9 +111,18 @@ def yearly_processed_csv_paths(base_data_dir: str, stn: str, year: int) -> dict:
     }
 
 
-def download_year_txt(auth_key: str, base_data_dir: str, year: int, stn: str = "0", timeout: int = 150) -> str:
+def download_year_txt(
+    auth_key: str,
+    base_data_dir: str,
+    year: int,
+    stn: str = "0",
+    timeout: int = 150,
+    max_retries: int = 3,
+    retry_base_sleep: float = 10.0,
+) -> str:
     """
     특정 연도(YYYY)의 일자료를 도움말 포함 형태로 다운로드하여 raw_data 폴더에 저장합니다.
+    실패 시 최대 max_retries회 재시도합니다 (exponential backoff).
     """
     import requests
 
@@ -130,13 +142,22 @@ def download_year_txt(auth_key: str, base_data_dir: str, year: int, stn: str = "
     raw_path = paths["raw"]
     os.makedirs(os.path.dirname(raw_path), exist_ok=True)
 
-    resp = requests.get(BASE_URL, params=params, timeout=timeout)
-    resp.raise_for_status()
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.get(BASE_URL, params=params, timeout=timeout)
+            resp.raise_for_status()
+            with open(raw_path, "w", encoding="utf-8") as f:
+                f.write(resp.text)
+            return raw_path
+        except (requests.exceptions.RequestException, IOError) as e:
+            last_err = e
+            if attempt < max_retries:
+                wait = retry_base_sleep * (2 ** (attempt - 1))
+                logging.warning(f"  [RETRY] {year} attempt {attempt}/{max_retries} failed: {e} (retry in {wait:.0f}s)")
+                time.sleep(wait)
 
-    with open(raw_path, "w", encoding="utf-8") as f:
-        f.write(resp.text)
-
-    return raw_path
+    raise last_err
 
 
 def process_year_file(base_data_dir: str, year: int, stn: str = "0") -> str:
@@ -145,27 +166,71 @@ def process_year_file(base_data_dir: str, year: int, stn: str = "0") -> str:
     return process_raw_txt_to_csv(paths["raw"], paths["proc"])  # 반환: CSV 경로
 
 
-def download_and_process_year(auth_key: str, base_data_dir: str, year: int, stn: str = "0") -> dict:
-    """다운로드 + 가공을 한 번에 수행하고 경로들을 반환합니다."""
+def download_and_process_year(
+    auth_key: str, base_data_dir: str, year: int, stn: str = "0", force: bool = False,
+) -> dict | None:
+    """다운로드 + 가공을 한 번에 수행하고 경로들을 반환합니다.
+    이미 CSV가 존재하면 스킵하고 None을 반환합니다. force=True이면 강제 재처리합니다."""
+    paths = yearly_processed_csv_paths(base_data_dir, stn, year)
+    if not force and os.path.exists(paths["proc"]):
+        print(f"  [SKIP] 이미 존재: {paths['proc']}")
+        return None
     raw = download_year_txt(auth_key=auth_key, base_data_dir=base_data_dir, year=year, stn=stn)
     proc = process_year_file(base_data_dir=base_data_dir, year=year, stn=stn)
     return {"raw": raw, "proc": proc}
 
 
-def run_year_range(auth_key: str, base_data_dir: str, start_year: int, end_year: int, stn: str = "0") -> list:
+def _setup_error_log(base_data_dir: str) -> str:
+    """오류 로그 파일 경로를 생성하고 반환합니다."""
+    log_dir = os.path.join(base_data_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(log_dir, f"error_{timestamp}.log")
+
+
+def run_year_range(
+    auth_key: str,
+    base_data_dir: str,
+    start_year: int,
+    end_year: int,
+    stn: str = "0",
+    sleep_between: float = 1.0,
+) -> list:
     """
     start_year부터 end_year까지(포함) 연단위로 다운로드 후 post_process_data에 CSV로 저장합니다.
+    실패한 연도는 오류 로그에 기록됩니다.
     """
     results = []
+    failed = []
+    error_log_path = _setup_error_log(base_data_dir)
+
     for year in range(start_year, end_year + 1):
         print(f"[연도 처리] {year} (stn={stn})")
         try:
             paths = download_and_process_year(auth_key, base_data_dir, year, stn)
+            if paths is None:
+                continue
             print(f"  - RAW : {paths['raw']}")
             print(f"  - CSV : {paths['proc']}")
             results.append(paths)
         except Exception as e:
-            print(f"  ✗ {year} 처리 실패: {e}")
+            print(f"  [FAIL] {year} 처리 실패: {e}")
+            failed.append({"year": year, "error": str(e)})
+
+        if year < end_year:
+            time.sleep(sleep_between)
+
+    # 오류 로그 저장
+    if failed:
+        with open(error_log_path, "w", encoding="utf-8") as f:
+            f.write(f"ASOS download error log - {datetime.now().isoformat()}\n")
+            f.write(f"Range: {start_year}-{end_year}, stn={stn}\n")
+            f.write(f"Failed: {len(failed)}/{end_year - start_year + 1}\n")
+            f.write("=" * 60 + "\n")
+            for item in failed:
+                f.write(f"{item['year']}: {item['error']}\n")
+        print(f"\n[ERROR LOG] {len(failed)}건 실패 -> {error_log_path}")
+
     return results
 
 
