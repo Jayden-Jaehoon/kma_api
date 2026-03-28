@@ -86,7 +86,17 @@ FUSION_DATA_ROOT=E:\kma
 
 **Path priority:** `--output-path` CLI arg > `FUSION_DATA_ROOT` in `.env` > default (`project_root/data`)
 
-### 3. Download Shapefiles
+### 3. Download Grid Coordinate File
+
+Download the "High-resolution grid lat/lon" NetCDF file from the **Fusion Weather** tab on the [KMA API Hub](https://apihub.kma.go.kr/) and place it in `data/geodata/`.
+This file is used to obtain grid point coordinates when building mapping tables.
+
+```
+data/geodata/
+└── sfc_grid_latlon.nc    # Grid lat/lon coordinates (2049x2049, ~4.2M grid points)
+```
+
+### 4. Download Shapefiles
 
 Only the shapefiles for your chosen `--region-type` are required.
 

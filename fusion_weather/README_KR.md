@@ -84,7 +84,17 @@ FUSION_DATA_ROOT=E:\kma
 
 **경로 우선순위:** `--output-path` CLI 인자 > `.env`의 `FUSION_DATA_ROOT` > 기본값(`project_root/data`)
 
-### 3. Shapefile 다운로드
+### 3. 격자 위경도 파일 다운로드
+
+[기상청 API허브](https://apihub.kma.go.kr/)의 **융합기상** 탭에서 "고해상도 격자자료 위경도" NetCDF 파일을 다운로드하여 `data/geodata/`에 배치합니다.
+매핑 테이블 생성 시 격자점 좌표로 사용됩니다.
+
+```
+data/geodata/
+└── sfc_grid_latlon.nc    # 격자 위경도 좌표 (2049x2049, ~4.2M 격자점)
+```
+
+### 4. Shapefile 다운로드
 
 사용하려는 `--region-type`에 해당하는 Shapefile만 준비하면 됩니다.
 

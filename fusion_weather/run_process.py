@@ -220,8 +220,8 @@ if __name__ == "__main__":
 
         # 예시 1) 하루만 후처리
         ide_argv = [
-            "--test-day", "20241128",
-            "--variables", "ta,rn_60m,sd_3hr",
+            "--test-day", "20190329",
+            "--variables", "ta,rn_60m",
             "--region-type", IDE_REGION_TYPE,
         ]
 
