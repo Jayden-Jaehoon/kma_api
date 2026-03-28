@@ -10,6 +10,12 @@ __pycache__/
 data/geodata/BND_ADM_DONG_PG.*
 data/geodata/sfc_grid_latlon.nc
 
+# 대용량 Shapefile / geodata (GitHub 100MB 제한)
+fusion_weather/data/geodata_hjd/
+fusion_weather/data/geodata_umd/
+fusion_weather/data/geodata/*.parquet
+fusion_weather/data/geodata/*.nc
+
 # 동적 데이터 (raw/interim/output) — 프로젝트 내 폴백 시 보호
 fusion_weather/data/fusion_raw/
 fusion_weather/data/fusion_interim/
