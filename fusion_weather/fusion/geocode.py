@@ -338,6 +338,48 @@ class GridToBjdMapper:
             )
 
 
+def build_unified_mapping(
+    config: FusionConfig,
+    force_rebuild: bool = False,
+) -> pd.DataFrame:
+    """HJD + BJD 통합 매핑 테이블 생성.
+
+    두 매핑을 grid_idx 기준으로 조인하여 하나의 테이블로 만듭니다.
+    컬럼: grid_idx, lat, lon, HJD_CD, HJD_NM, EMD_CD, EMD_NM
+    """
+    unified_path = config.grid_unified_mapping_file
+
+    if not force_rebuild and os.path.exists(unified_path):
+        print(f"기존 통합 매핑 파일 로드: {unified_path}")
+        return pd.read_parquet(unified_path)
+
+    print("통합 매핑 테이블(HJD+BJD) 생성 중...")
+
+    hjd_mapper = GridToHjdMapper(config)
+    bjd_mapper = GridToBjdMapper(config)
+
+    hjd_df = hjd_mapper.build_mapping(force_rebuild=force_rebuild)
+    bjd_df = bjd_mapper.build_mapping(force_rebuild=force_rebuild)
+
+    # grid_idx 기준으로 조인 (lat, lon은 HJD 측에서 가져옴)
+    unified = hjd_df[['grid_idx', 'lat', 'lon', 'HJD_CD', 'HJD_NM']].merge(
+        bjd_df[['grid_idx', 'EMD_CD', 'EMD_NM']],
+        on='grid_idx',
+        how='outer',
+    )
+
+    os.makedirs(os.path.dirname(unified_path), exist_ok=True)
+    unified.to_parquet(unified_path, index=False)
+
+    both_valid = unified['HJD_CD'].notna() & unified['EMD_CD'].notna()
+    print(f"       통합 매핑 완료: {both_valid.sum():,} 격자점 (양쪽 모두 매핑)")
+    print(f"       HJD만: {(unified['HJD_CD'].notna() & unified['EMD_CD'].isna()).sum():,}")
+    print(f"       BJD만: {(unified['HJD_CD'].isna() & unified['EMD_CD'].notna()).sum():,}")
+    print(f"       저장: {unified_path}")
+
+    return unified
+
+
 if __name__ == "__main__":
     # 테스트 실행
     print("=== 행정동 매핑 ===")

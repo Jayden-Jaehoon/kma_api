@@ -134,10 +134,10 @@ def main(argv: List[str] | None = None):
     print("=" * 70)
     print("[A] raw 다운로드/캐시 생성")
     print("=" * 70)
+    _temp_config = FusionConfig(project_root=project_root, custom_data_root=args.output_path, api_type=args.api_type)
     print("project_root:", project_root)
-    print("api_type:", args.api_type, f"({FusionConfig.API_BASE_URLS[args.api_type]})")
-    if args.output_path:
-        print("output_path:", args.output_path)
+    print("api_type:", args.api_type, f"({_temp_config.api_base_url})")
+    print("dynamic_data_dir:", _temp_config.dynamic_data_dir)
     print("dates:", len(dates), "(first/last:", dates[0], "~", dates[-1], ")")
     print("variables:", variables)
     print("max_workers:", args.max_workers)
@@ -201,31 +201,23 @@ if __name__ == "__main__":
     # None으로 설정하면 기본 경로 사용 (project_root/data/fusion_raw)
     IDE_DATA_OUTPUT_PATH = r"E:\kma"  # 예: "D:/weather_data/fusion_raw"
 
+    # API 유형 설정
+    # "org"    = 기관용 대용량 (apihub-org.kma.go.kr) — 기관 API키 필요
+    # "public" = 일반 개인용 (apihub.kma.go.kr) — 개인 API키
+    IDE_API_TYPE = "org"
+
     if USE_IDE_DEFAULTS:
         if IDE_PROJECT_ROOT:
             os.chdir(IDE_PROJECT_ROOT)
 
         # 예시 1) 하루만 다운로드
         # ide_argv = [
-        #     "--test-day",
-        #     "20241128",
-        #     "--variables",
-        #     "ta,rn_60m,sd_3hr",
-        #     "--max-workers",
-        #     "4",
+        #     "--test-day", "20241128",
+        #     "--variables", "ta,rn_60m,sd_3hr",
+        #     "--max-workers", "4",
         # ]
 
-        # # 예시 2) 연/월 범위 다운로드 (필요하면 위 ide_argv와 교체)
-        # ide_argv = [
-        #     "--start-year", "2020",
-        #     "--end-year", "2025",
-        #     "--start-month", "1",
-        #     "--end-month", "12",
-        #     "--variables", "sd_3hr",
-        #     "--max-workers", "3",
-        # ]
-
-        # 예시 2) 연/월 범위 다운로드 (필요하면 위 ide_argv와 교체)
+        # 예시 2) 연/월 범위 다운로드
         ide_argv = [
             "--start-year", "2018",
             "--end-year", "2019",
@@ -234,6 +226,8 @@ if __name__ == "__main__":
             "--variables", "ta,rn_60m,sd_3hr",
             "--max-workers", "3",
         ]
+
+        ide_argv.extend(["--api-type", IDE_API_TYPE])
 
         if IDE_DATA_OUTPUT_PATH:
             ide_argv.extend(["--output-path", IDE_DATA_OUTPUT_PATH])

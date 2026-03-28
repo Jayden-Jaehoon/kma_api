@@ -14,31 +14,42 @@ class FusionConfig:
     # Project root path
     project_root: str = field(default_factory=lambda: os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-    # Custom data root path (if None, uses project_root/data)
+    # 동적 데이터 경로 (fusion_raw, fusion_interim, fusion_output)
+    # 우선순위: custom_data_root (--output-path) > FUSION_DATA_ROOT (.env) > project_root/data
     custom_data_root: str = None
 
-    # Data paths
+    # 정적 데이터 경로 (geodata, shapefile 등) — 항상 project_root/data
     @property
     def data_dir(self) -> str:
-        if self.custom_data_root:
-            return self.custom_data_root
         return os.path.join(self.project_root, "data")
 
+    @property
+    def dynamic_data_dir(self) -> str:
+        """동적 데이터(raw/interim/output) 루트 경로."""
+        if self.custom_data_root:
+            return self.custom_data_root
+        env_root = os.environ.get("FUSION_DATA_ROOT")
+        if env_root:
+            return env_root
+        return os.path.join(self.project_root, "data")
+
+    # 정적 경로 (geodata, shapefile)
     @property
     def geodata_dir(self) -> str:
         return os.path.join(self.data_dir, "geodata")
 
+    # 동적 경로 (raw, interim, output)
     @property
     def fusion_raw_dir(self) -> str:
-        return os.path.join(self.data_dir, "fusion_raw")
+        return os.path.join(self.dynamic_data_dir, "fusion_raw")
 
     @property
     def fusion_interim_dir(self) -> str:
-        return os.path.join(self.data_dir, "fusion_interim")
+        return os.path.join(self.dynamic_data_dir, "fusion_interim")
 
     @property
     def fusion_output_dir(self) -> str:
-        return os.path.join(self.data_dir, "fusion_output")
+        return os.path.join(self.dynamic_data_dir, "fusion_output")
 
     # File paths
     @property
@@ -64,6 +75,11 @@ class FusionConfig:
     def grid_bjd_mapping_file(self) -> str:
         """Grid-to-legal-dong mapping file path"""
         return os.path.join(self.geodata_dir, "grid_to_emd_umd.parquet")
+
+    @property
+    def grid_unified_mapping_file(self) -> str:
+        """Grid-to-both-HJD-and-BJD mapping file path"""
+        return os.path.join(self.geodata_dir, "grid_to_unified.parquet")
 
     # API configuration
     # 기관용(org): 대용량 처리용 별도 도메인, 일반(public): 개인 API키용

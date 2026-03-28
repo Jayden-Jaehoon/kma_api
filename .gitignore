@@ -9,6 +9,11 @@ __pycache__/
 *.parquet
 data/geodata/BND_ADM_DONG_PG.*
 data/geodata/sfc_grid_latlon.nc
+
+# 동적 데이터 (raw/interim/output) — 프로젝트 내 폴백 시 보호
+fusion_weather/data/fusion_raw/
+fusion_weather/data/fusion_interim/
+fusion_weather/data/fusion_output/
 # C extensions
 *.so
 .idea

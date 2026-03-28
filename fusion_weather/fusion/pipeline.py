@@ -14,15 +14,9 @@ import pandas as pd
 from tqdm import tqdm
 
 from .config import FusionConfig, DEFAULT_CONFIG
-from .geocode import GridToHjdMapper, GridToBjdMapper
+from .geocode import GridToHjdMapper, GridToBjdMapper, build_unified_mapping
 from .download import FusionDataDownloader
 from .aggregate import TimeAggregator, SpatialAggregator, OutputFormatter
-
-# region_type → (매퍼 클래스, 코드 컬럼, 명칭 컬럼)
-_REGION_REGISTRY = {
-    'hjd': (GridToHjdMapper, 'HJD_CD', 'HJD_NM'),
-    'bjd': (GridToBjdMapper, 'EMD_CD', 'EMD_NM'),
-}
 
 
 class FusionPipeline:
@@ -52,14 +46,19 @@ class FusionPipeline:
         self._expected_grid_n: Optional[int] = None
     
     def ensure_mapping(self, region_type: str = 'hjd', force_rebuild: bool = False):
-        """격자-지역 매핑 테이블 확보 (hjd 또는 bjd)"""
-        if region_type not in _REGION_REGISTRY:
-            raise ValueError(f"지원하지 않는 region_type: {region_type}. 가능: {list(_REGION_REGISTRY)}")
-
+        """격자-지역 매핑 테이블 확보 (hjd, bjd, both)"""
         if region_type not in self._region_cache or force_rebuild:
-            mapper_cls, _, _ = _REGION_REGISTRY[region_type]
-            mapper = mapper_cls(self.config)
-            mapping_df = mapper.build_mapping(force_rebuild=force_rebuild)
+            if region_type == 'hjd':
+                mapper = GridToHjdMapper(self.config)
+                mapping_df = mapper.build_mapping(force_rebuild=force_rebuild)
+            elif region_type == 'bjd':
+                mapper = GridToBjdMapper(self.config)
+                mapping_df = mapper.build_mapping(force_rebuild=force_rebuild)
+            elif region_type == 'both':
+                mapping_df = build_unified_mapping(self.config, force_rebuild=force_rebuild)
+            else:
+                raise ValueError(f"지원하지 않는 region_type: {region_type}. 가능: hjd, bjd, both")
+
             spatial_agg = SpatialAggregator(mapping_df, self.config)
             self._region_cache[region_type] = (mapping_df, spatial_agg)
 
@@ -224,15 +223,12 @@ class FusionPipeline:
         if not results:
             return pd.DataFrame()
 
-        # index_cols를 region_type에 맞게 전달
-        _, _, _ = _REGION_REGISTRY[region_type]
         final_df = self.formatter.merge_variables(results)
 
         if save_interim:
             interim_dir = os.path.join(self.config.fusion_interim_dir, year)
             os.makedirs(interim_dir, exist_ok=True)
-            suffix = f"_{region_type}" if region_type != 'hjd' else ""
-            interim_path = os.path.join(interim_dir, f"fusion_{date}{suffix}.parquet")
+            interim_path = os.path.join(interim_dir, f"fusion_{date}_{region_type}.parquet")
             final_df.to_parquet(interim_path, index=False)
 
         return final_df

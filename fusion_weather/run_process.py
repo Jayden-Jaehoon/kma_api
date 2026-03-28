@@ -67,8 +67,9 @@ def _run_single_region(
     region_type: str,
 ):
     """단일 region_type에 대해 후처리 실행."""
-    label = "행정동(HJD)" if region_type == "hjd" else "법정동(BJD)"
-    suffix = f"_{region_type}" if region_type != "hjd" else ""
+    _labels = {"hjd": "행정동(HJD)", "bjd": "법정동(BJD)", "both": "행정동+법정동(HJD+BJD)"}
+    label = _labels.get(region_type, region_type)
+    suffix = f"_{region_type}"
 
     print("=" * 70)
     print(f"[B] {label} 후처리(캐시 기반)")
@@ -77,8 +78,9 @@ def _run_single_region(
     # 매핑 준비
     pipeline.ensure_mapping(region_type, force_rebuild=args.force_rebuild_mapping)
     mapping_df, _ = pipeline._get_region(region_type)
-    id_col = "HJD_CD" if region_type == "hjd" else "EMD_CD"
-    print(f"매핑 완료: {len(mapping_df):,} 격자점, {mapping_df[id_col].nunique():,} 지역")
+    id_cols = [c for c in ['HJD_CD', 'EMD_CD'] if c in mapping_df.columns]
+    region_counts = ", ".join(f"{c}: {mapping_df[c].nunique():,}" for c in id_cols)
+    print(f"매핑 완료: {len(mapping_df):,} 격자점, {region_counts}")
     print("variables:", variables)
     print("start:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     print()
@@ -187,18 +189,12 @@ def main(argv: List[str] | None = None):
     pipeline = FusionPipeline(auth_key=auth_key, config=config)
 
     print("project_root:", project_root)
-    if args.output_path:
-        print("output_path:", args.output_path)
+    print("data_dir (정적):", config.data_dir)
+    print("dynamic_data_dir (동적):", config.dynamic_data_dir)
     print("region_type:", args.region_type)
     print()
 
-    # region_type에 따라 실행
-    if args.region_type == "both":
-        for rt in ["hjd", "bjd"]:
-            _run_single_region(pipeline, config, args, variables, rt)
-            print()
-    else:
-        _run_single_region(pipeline, config, args, variables, args.region_type)
+    _run_single_region(pipeline, config, args, variables, args.region_type)
 
 
 if __name__ == "__main__":
@@ -211,18 +207,36 @@ if __name__ == "__main__":
     # IDE에서 Working Directory를 프로젝트 루트로 잡지 못할 때만 사용하세요.
     IDE_PROJECT_ROOT = None
 
+    # 데이터 경로 설정 (A단계 run_download.py의 IDE_DATA_OUTPUT_PATH와 동일하게 지정)
+    # None으로 설정하면 기본 경로 사용 (project_root/data)
+    IDE_DATA_OUTPUT_PATH = r"E:\kma"  # 예: "D:/weather_data"
+
+    # 집계 단위: "hjd"=행정동, "bjd"=법정동, "both"=둘 다
+    IDE_REGION_TYPE = "both"
+
     if USE_IDE_DEFAULTS:
         if IDE_PROJECT_ROOT:
             os.chdir(IDE_PROJECT_ROOT)
 
+        # 예시 1) 하루만 후처리
         ide_argv = [
-            "--test-day",
-            "20241128",
-            "--variables",
-            "ta,rn_60m,sd_3hr",
-            "--region-type",
-            "both",
+            "--test-day", "20241128",
+            "--variables", "ta,rn_60m,sd_3hr",
+            "--region-type", IDE_REGION_TYPE,
         ]
+
+        # 예시 2) 연/월 범위 후처리
+        # ide_argv = [
+        #     "--start-year", "2024",
+        #     "--end-year", "2024",
+        #     "--start-month", "1",
+        #     "--end-month", "12",
+        #     "--variables", "ta,rn_60m,sd_3hr",
+        #     "--region-type", IDE_REGION_TYPE,
+        # ]
+
+        if IDE_DATA_OUTPUT_PATH:
+            ide_argv.extend(["--output-path", IDE_DATA_OUTPUT_PATH])
 
         main(argv=ide_argv)
     else:

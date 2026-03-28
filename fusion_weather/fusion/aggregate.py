@@ -81,26 +81,36 @@ class TimeAggregator:
 
 
 class SpatialAggregator:
-    """공간 집계 클래스 (격자 → 행정동)"""
-    
+    """공간 집계 클래스 (격자 → 지역)
+
+    매핑 테이블의 컬럼을 자동 감지하여 HJD, BJD, 또는 통합(HJD+BJD)으로 동작합니다.
+    """
+
     def __init__(self, grid_mapping: pd.DataFrame, config: Optional[FusionConfig] = None):
         """
         Args:
-            grid_mapping: 격자-행정동코드 매핑 테이블 (grid_idx, HJD_CD)
+            grid_mapping: 격자-지역코드 매핑 테이블
+                - HJD 전용: grid_idx, HJD_CD, HJD_NM
+                - BJD 전용: grid_idx, EMD_CD, EMD_NM
+                - 통합:     grid_idx, HJD_CD, HJD_NM, EMD_CD, EMD_NM
         """
         self.grid_mapping = grid_mapping
         self.config = config or DEFAULT_CONFIG
-        
-        # 매핑 테이블에서 지역 코드 컬럼 자동 감지 (HJD 또는 BJD)
-        if 'HJD_CD' in grid_mapping.columns:
-            self.id_col = 'HJD_CD'
-            self.nm_col = 'HJD_NM'
-        elif 'EMD_CD' in grid_mapping.columns:
-            self.id_col = 'EMD_CD'
-            self.nm_col = 'EMD_NM'
+
+        # 매핑 테이블에서 지역 코드 컬럼 자동 감지
+        self.id_cols: List[str] = []  # groupby에 사용할 코드 컬럼(들)
+        has_hjd = 'HJD_CD' in grid_mapping.columns
+        has_bjd = 'EMD_CD' in grid_mapping.columns
+
+        if has_hjd and has_bjd:
+            self.id_cols = ['HJD_CD', 'EMD_CD']
+        elif has_hjd:
+            self.id_cols = ['HJD_CD']
+        elif has_bjd:
+            self.id_cols = ['EMD_CD']
         else:
             raise ValueError("매핑 테이블에서 지역 코드 컬럼(HJD_CD 또는 EMD_CD)을 찾을 수 없습니다.")
-    
+
     def aggregate_grid_to_region(
         self,
         df: pd.DataFrame,
@@ -110,40 +120,39 @@ class SpatialAggregator:
     ) -> pd.DataFrame:
         """
         격자 데이터를 지역 단위로 집계
-        
+
         Args:
             df: 입력 DataFrame (grid_idx, date, value_cols...)
             value_cols: 집계할 값 컬럼 리스트
             grid_col: 격자 인덱스 컬럼명
             method: 집계 방법 (mean, sum, median)
-            
+
         Returns:
             지역별 집계된 DataFrame
         """
         # 매핑 조인
+        merge_cols = [grid_col] + self.id_cols
         df_with_id = df.merge(
-            self.grid_mapping[[grid_col, self.id_col]],
+            self.grid_mapping[merge_cols],
             on=grid_col,
             how='left',
         )
-        
-        # 매핑 실패 행 제거 (해양 등)
-        df_with_id = df_with_id[df_with_id[self.id_col].notna()]
+
+        # 매핑 실패 행 제거 (해양 등) - 모든 id 컬럼이 있어야 유효
+        for col in self.id_cols:
+            df_with_id = df_with_id[df_with_id[col].notna()]
 
         # 강수/적설 관련 컬럼의 NaN 처리 정책:
         # - sum 집계: NaN을 0으로 처리 (누적 합산 시 "관측 없음 = 0"으로 간주)
         # - mean/median 집계: NaN 유지 (pandas groupby가 자동으로 NaN을 제외하고 평균 계산)
-        #   → fillna(0)을 하면 실제 관측이 없는 격자가 0으로 취급되어 평균이 낮아지는 문제 방지
         if method == 'sum':
             precip_snow_cols = [c for c in value_cols if c.startswith('p') or c.startswith('s')]
             if precip_snow_cols:
                 df_with_id[precip_snow_cols] = df_with_id[precip_snow_cols].fillna(0)
-        
+
         # 그룹 컬럼 결정
-        group_cols = ['date', self.id_col]
-        if 'date' not in df.columns:
-            group_cols = [self.id_col]
-        
+        group_cols = (['date'] if 'date' in df.columns else []) + self.id_cols
+
         # 집계
         if method == 'mean':
             result = df_with_id.groupby(group_cols)[value_cols].mean().reset_index()
@@ -153,22 +162,8 @@ class SpatialAggregator:
             result = df_with_id.groupby(group_cols)[value_cols].median().reset_index()
         else:
             raise ValueError(f"Unknown method: {method}")
-        
+
         return result
-    
-    def get_region_statistics(self) -> pd.DataFrame:
-        """지역별 격자 수 통계"""
-        stats = self.grid_mapping.groupby(self.id_col).agg({
-            'grid_idx': 'count',
-            'lat': ['min', 'max', 'mean'],
-            'lon': ['min', 'max', 'mean'],
-        }).reset_index()
-        
-        stats.columns = [self.id_col, 'grid_count', 
-                        'lat_min', 'lat_max', 'lat_mean',
-                        'lon_min', 'lon_max', 'lon_mean']
-        
-        return stats
 
 
 class OutputFormatter:

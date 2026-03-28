@@ -5,7 +5,7 @@
 """
 
 from .config import FusionConfig
-from .geocode import GridToHjdMapper, GridToBjdMapper
+from .geocode import GridToHjdMapper, GridToBjdMapper, build_unified_mapping
 from .download import FusionDataDownloader
 from .aggregate import TimeAggregator, SpatialAggregator
 from .pipeline import FusionPipeline
@@ -14,6 +14,7 @@ __all__ = [
     'FusionConfig',
     'GridToHjdMapper',
     'GridToBjdMapper',
+    'build_unified_mapping',
     'FusionDataDownloader',
     'TimeAggregator',
     'SpatialAggregator',
