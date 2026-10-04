@@ -91,7 +91,7 @@ pip install -r requirements.txt
 ## API Keys & Path Configuration
 
 Both systems require an authentication key from the [KMA API Hub](https://apihub.kma.go.kr/).
-Keys are managed in the project root `.env` file. (Template: [`.env.example`](.env.example))
+Keys are managed in the project root `.env` file. (Template: [`.env.example`](.env))
 
 ```env
 # API keys

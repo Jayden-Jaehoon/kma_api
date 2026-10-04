@@ -91,7 +91,7 @@ pip install -r requirements.txt
 ## 인증키 및 경로 설정
 
 두 시스템 모두 [기상청 API허브](https://apihub.kma.go.kr/)에서 발급받은 인증키가 필요합니다.
-프로젝트 루트의 `.env` 파일에서 통합 관리합니다. (템플릿: [`.env.example`](.env.example))
+프로젝트 루트의 `.env` 파일에서 통합 관리합니다. (템플릿: [`.env.example`](.env))
 
 ```env
 # 인증키

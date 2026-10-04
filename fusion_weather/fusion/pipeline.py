@@ -78,8 +78,12 @@ class FusionPipeline:
         목적:
         - A(다운로드 전용) 단계에서 매핑 테이블 전체 로드 없이도 Strict 파싱 검증을 할 수 있게 함.
         """
-        if self._grid_mapping is not None:
-            return len(self._grid_mapping)
+        # 예전 버전의 단일 매핑 캐시(`_grid_mapping`)가 제거되고
+        # 현재는 `_region_cache`를 사용하므로, 구버전 인스턴스와의
+        # 호환성을 위해 속성이 있을 때만 참조합니다.
+        grid_mapping = getattr(self, "_grid_mapping", None)
+        if grid_mapping is not None:
+            return len(grid_mapping)
 
         if self._expected_grid_n is not None:
             return self._expected_grid_n
